@@ -1,3 +1,26 @@
+# Estate Studio — Build 03.8.0 Architectural Detector V2
+
+Detectorul automat de apartamente a fost refăcut fără ML / training.
+
+## Ce se schimbă
+- rezoluție analiză crescută de la max ~520 px la max ~1400 px (cu limită de ~1.8 MP);
+- fundalul exterior care atinge marginea canvasului nu mai este propus ca apartament;
+- nu mai transformă orice pixel întunecat în „perete”;
+- extrage mai întâi trasee lungi orizontale/verticale, ca să reducă influența mobilierului și textelor;
+- reconectează controlat goluri mici din pereți;
+- păstrează Voronoi-ul intern pentru a pune limita comună aproape de mijlocul peretelui gros;
+- contururile raster sunt transformate în poligoane arhitecturale:
+  - RDP mai agresiv;
+  - eliminare muchii foarte scurte;
+  - eliminare colțuri aproape coliniare;
+  - snap la 0° / 45° / 90° / 135° pentru segmentele arhitecturale;
+  - intersecții geometrice între segmente, în loc de zig-zag pixel cu pixel.
+- Modul asistat rămâne: un click aproximativ în fiecare apartament, fără trasare manuală.
+
+Nu există model AI și nu se antrenează nimic.
+
+`/api/version` => `03.8.0-architectural-detector-v2`
+
 # Estate Studio — Build 03.7.16 Reference Camera Motion
 
 Camera din viewerul public a fost refăcută după logica din codul original `/macheta/` furnizat ca referință.

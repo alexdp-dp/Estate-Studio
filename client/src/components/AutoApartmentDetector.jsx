@@ -35,6 +35,99 @@ function morphErode(src,w,h){
   return out;
 }
 
+function keepLongRuns(src,w,h,minRun){
+  const out=new Uint8Array(src.length);
+
+  // horizontal runs
+  for(let y=0;y<h;y++){
+    let x=0;
+    while(x<w){
+      while(x<w&&!src[y*w+x])x++;
+      const start=x;
+      while(x<w&&src[y*w+x])x++;
+      const len=x-start;
+      if(len>=minRun){
+        for(let xx=start;xx<x;xx++)out[y*w+xx]=1;
+      }
+    }
+  }
+
+  // vertical runs
+  for(let x=0;x<w;x++){
+    let y=0;
+    while(y<h){
+      while(y<h&&!src[y*w+x])y++;
+      const start=y;
+      while(y<h&&src[y*w+x])y++;
+      const len=y-start;
+      if(len>=minRun){
+        for(let yy=start;yy<y;yy++)out[yy*w+x]=1;
+      }
+    }
+  }
+
+  return out;
+}
+
+function bridgeAxisGaps(src,w,h,maxGap,minSupport){
+  const out=src.slice();
+
+  function bridgeLine(get,set,len){
+    const runs=[];
+    let i=0;
+    while(i<len){
+      while(i<len&&!get(i))i++;
+      const start=i;
+      while(i<len&&get(i))i++;
+      if(i>start)runs.push([start,i-1]);
+    }
+    for(let r=0;r<runs.length-1;r++){
+      const a=runs[r],b=runs[r+1];
+      const gap=b[0]-a[1]-1;
+      const lenA=a[1]-a[0]+1,lenB=b[1]-b[0]+1;
+      if(gap>0&&gap<=maxGap&&lenA>=minSupport&&lenB>=minSupport){
+        for(let k=a[1]+1;k<b[0];k++)set(k);
+      }
+    }
+  }
+
+  for(let y=0;y<h;y++){
+    bridgeLine(
+      i=>!!out[y*w+i],
+      i=>{out[y*w+i]=1},
+      w
+    );
+  }
+  for(let x=0;x<w;x++){
+    bridgeLine(
+      i=>!!out[i*w+x],
+      i=>{out[i*w+x]=1},
+      h
+    );
+  }
+  return out;
+}
+
+function buildStructuralWallMask(dark,w,h){
+  const base=Math.min(w,h);
+  const minRun=Math.max(10,Math.round(base*.022));
+  const maxGap=Math.max(4,Math.round(base*.010));
+  const minSupport=Math.max(5,Math.round(minRun*.45));
+
+  // Keep long architectural strokes and suppress most furniture / text details.
+  let structural=keepLongRuns(dark,w,h,minRun);
+
+  // Doors and antialiasing interrupt walls; reconnect only small axial gaps.
+  structural=bridgeAxisGaps(structural,w,h,maxGap,minSupport);
+
+  // Close tiny holes and restore a realistic wall band around the detected axes.
+  structural=morphDilate(structural,w,h);
+  structural=morphErode(structural,w,h);
+  structural=morphDilate(structural,w,h);
+
+  return structural;
+}
+
 function components(mask,w,h,eight=true){
   const labels=new Int32Array(mask.length);
   const queue=new Int32Array(mask.length);
@@ -81,6 +174,9 @@ function candidatePool(stats,opaqueCount){
   return stats
     .filter(s=>{
       if(s.area<minArea)return false;
+      // The white background outside a floor plan is often one huge component.
+      // Real apartment interiors should not touch the analysis canvas border.
+      if(s.touchesBorder)return false;
       const aspect=Math.min(s.width,s.height)/Math.max(s.width,s.height);
       // Eliminate long balcony/terrace bands and thin shafts from automatic apartment candidates.
       if(aspect<.30 && s.area<opaqueCount*.04)return false;
@@ -172,6 +268,126 @@ function simplifyClosed(loop,eps=2.2){
   return out;
 }
 
+
+function angleDiffPi(a,b){
+  let d=Math.abs(a-b)%Math.PI;
+  return Math.min(d,Math.PI-d);
+}
+
+function lineIntersection(p1,d1,p2,d2){
+  const cross=d1[0]*d2[1]-d1[1]*d2[0];
+  if(Math.abs(cross)<1e-6)return null;
+  const rx=p2[0]-p1[0],ry=p2[1]-p1[1];
+  const t=(rx*d2[1]-ry*d2[0])/cross;
+  return [p1[0]+d1[0]*t,p1[1]+d1[1]*t];
+}
+
+function pruneShortEdges(points,minLen){
+  let out=points.slice();
+  let guard=0;
+  while(out.length>4&&guard++<100){
+    let shortest=Infinity,idx=-1;
+    for(let i=0;i<out.length;i++){
+      const a=out[i],b=out[(i+1)%out.length];
+      const len=Math.hypot(b[0]-a[0],b[1]-a[1]);
+      if(len<shortest){shortest=len;idx=i}
+    }
+    if(shortest>=minLen)break;
+
+    // Remove the vertex at the end of the shortest edge.
+    out.splice((idx+1)%out.length,1);
+  }
+  return out;
+}
+
+function removeNearCollinear(points,tolDeg=5){
+  let out=points.slice(),changed=true,guard=0;
+  const tol=tolDeg*Math.PI/180;
+  while(changed&&out.length>4&&guard++<20){
+    changed=false;
+    const next=[];
+    for(let i=0;i<out.length;i++){
+      const a=out[(i-1+out.length)%out.length];
+      const b=out[i];
+      const c=out[(i+1)%out.length];
+      const a1=Math.atan2(b[1]-a[1],b[0]-a[0]);
+      const a2=Math.atan2(c[1]-b[1],c[0]-b[0]);
+      if(angleDiffPi(a1,a2)<tol){changed=true;continue}
+      next.push(b);
+    }
+    out=next;
+  }
+  return out;
+}
+
+function architecturalPolygonize(loop,w,h){
+  if(loop.length<4)return loop;
+
+  const dim=Math.max(w,h);
+  let eps=Math.max(2.8,dim*.0045);
+  let pts=simplifyClosed(loop,eps);
+
+  // Stronger simplification for noisy raster contours.
+  while(pts.length>36&&eps<dim*.018){
+    eps*=1.22;
+    pts=simplifyClosed(loop,eps);
+  }
+
+  pts=pruneShortEdges(pts,Math.max(4,dim*.0075));
+  pts=removeNearCollinear(pts,6);
+
+  if(pts.length<4)return pts;
+
+  const snapAngles=[0,Math.PI/4,Math.PI/2,3*Math.PI/4];
+  const lines=[];
+
+  for(let i=0;i<pts.length;i++){
+    const a=pts[i],b=pts[(i+1)%pts.length];
+    const dx=b[0]-a[0],dy=b[1]-a[1];
+    const len=Math.hypot(dx,dy)||1;
+    let angle=Math.atan2(dy,dx);
+    while(angle<0)angle+=Math.PI;
+    while(angle>=Math.PI)angle-=Math.PI;
+
+    let best=snapAngles[0],bestDiff=Infinity;
+    for(const candidate of snapAngles){
+      const diff=angleDiffPi(angle,candidate);
+      if(diff<bestDiff){bestDiff=diff;best=candidate}
+    }
+
+    // Architectural floor plans are overwhelmingly orthogonal. Preserve a clearly
+    // non-standard long edge only when it is far from our normal 0/45/90/135 set.
+    const snapped=bestDiff<=14*Math.PI/180 || len<dim*.10;
+    const finalAngle=snapped?best:angle;
+
+    lines.push({
+      p:[(a[0]+b[0])/2,(a[1]+b[1])/2],
+      d:[Math.cos(finalAngle),Math.sin(finalAngle)],
+      len
+    });
+  }
+
+  const out=[];
+  const maxShift=dim*.055;
+  for(let i=0;i<lines.length;i++){
+    const prev=lines[(i-1+lines.length)%lines.length];
+    const cur=lines[i];
+    let p=lineIntersection(prev.p,prev.d,cur.p,cur.d);
+    const original=pts[i];
+
+    if(!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1]) ||
+       Math.hypot(p[0]-original[0],p[1]-original[1])>maxShift){
+      p=original.slice();
+    }
+
+    p[0]=clamp(p[0],0,w);
+    p[1]=clamp(p[1],0,h);
+    out.push(p);
+  }
+
+  return removeNearCollinear(pruneShortEdges(out,Math.max(3,dim*.0055)),4);
+}
+
 function contourForLabel(labelMap,target,w,h){
   const edges=[];
   const byStart=new Map();
@@ -214,10 +430,9 @@ function contourForLabel(labelMap,target,w,h){
   }
   if(!loops.length)return [];
   loops.sort((a,b)=>Math.abs(polygonArea(b))-Math.abs(polygonArea(a)));
-  let chosen=loops[0],eps=2.2;
-  let simplified=simplifyClosed(chosen,eps);
-  while(simplified.length>80&&eps<10){eps+=.8;simplified=simplifyClosed(chosen,eps)}
-  return simplified.map(([x,y])=>({x:clamp(x/w,0,1),y:clamp(y/h,0,1)}));
+  const chosen=loops[0];
+  const polygon=architecturalPolygonize(chosen,w,h);
+  return polygon.map(([x,y])=>({x:clamp(x/w,0,1),y:clamp(y/h,0,1)}));
 }
 
 function analyzePixels(imageData,w,h,threshold,expected,excludedIds=new Set(),seedPoints=[]){
@@ -234,10 +449,10 @@ function analyzePixels(imageData,w,h,threshold,expected,excludedIds=new Set(),se
     }
   }
 
-  // Close little antialias/gaps, then grow the dark-wall band slightly.
-  let wall=morphDilate(dark,w,h);
-  wall=morphErode(wall,w,h);
-  wall=morphDilate(wall,w,h);
+  // Architectural V2:
+  // isolate long wall-like strokes first, then reconnect small door / antialias gaps.
+  // This avoids treating furniture, text and decoration as apartment boundaries.
+  const wall=buildStructuralWallMask(dark,w,h);
 
   const free=new Uint8Array(N);
   for(let i=0;i<N;i++)free[i]=opaque[i]&&!wall[i]?1:0;
@@ -386,12 +601,14 @@ function analyzeAuto(imageData,w,h,expected,excludedIds=new Set(),seedPoints=[])
   return best;
 }
 
-async function loadPlan(url,maxDim=520){
+async function loadPlan(url,maxDim=1400){
   const r=await fetch(url,{mode:'cors'});
   if(!r.ok)throw new Error(`Nu pot încărca planul (${r.status}).`);
   const blob=await r.blob();
   const bmp=await createImageBitmap(blob);
-  const scale=Math.min(1,maxDim/Math.max(bmp.width,bmp.height));
+  const byDim=Math.min(1,maxDim/Math.max(bmp.width,bmp.height));
+  const byPixels=Math.min(1,Math.sqrt(1800000/Math.max(1,bmp.width*bmp.height)));
+  const scale=Math.min(byDim,byPixels);
   const w=Math.max(1,Math.round(bmp.width*scale)),h=Math.max(1,Math.round(bmp.height*scale));
   const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
   const ctx=canvas.getContext('2d',{willReadFrequently:true});
@@ -522,7 +739,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     <div className="modal-card auto-detector-card">
       <button className="x" onClick={onClose}>×</button>
       <div className="auto-head">
-        <div><small>AUTO-DETECT · BETA</small><h2>Detectează apartamentele</h2><p>Detectorul caută pereții groși întunecați, separă zonele locuibile și mută limitele comune spre axa mediană a pereților.</p></div>
+        <div><small>AUTO-DETECT · ARCHITECTURAL V2</small><h2>Detectează apartamentele</h2><p>Detectorul reconstruiește pereții ca geometrie arhitecturală, ignoră mare parte din mobilier și produce contururi din segmente drepte, cu limite comune pe axa mediană a pereților.</p></div>
       </div>
 
       <div className="detector-settings detector-settings-v2">
@@ -587,11 +804,12 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
 
       {!result&&!guided&&<div className="detector-intro">
         <b>Ce face detectorul</b>
-        <span>• pereții negri/gri groși devin bariere;</span>
-        <span>• golurile transparente interioare sunt tratate ca zonă comună/scară;</span>
-        <span>• apartamentele concurează pentru jumătatea pereților comuni;</span>
-        <span>• elimină automat zonele foarte înguste (benzi de terasă/balcon) din lista de apartamente;</span>
-        <span>• dacă Auto nu separă bine planul, activezi „Mod asistat” și dai câte un click în fiecare apartament;</span>
+        <span>• caută întâi trasee lungi de perete, nu orice pixel întunecat;</span>
+        <span>• mobilierul, textele și detaliile mici sunt filtrate înainte de segmentare;</span>
+        <span>• golurile mici din pereți (uși / antialiasing) sunt reconectate controlat;</span>
+        <span>• limitele dintre apartamente sunt împinse spre axa mediană a pereților comuni;</span>
+        <span>• conturul final este reconstruit din segmente arhitecturale 0° / 45° / 90° / 135° și muchii lungi reale;</span>
+        <span>• în Mod asistat dai doar câte un click în fiecare apartament; detectorul construiește singur contururile;</span>
         <span>• nimic nu se salvează până nu confirmi propunerile.</span>
       </div>}
 
@@ -599,7 +817,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         <div className="detector-summary">
           <b>{result.detections.length} apartamente propuse</b>
           <span>{coreText}</span>
-          <small>Prag pereți folosit: {result.threshold}{guided?` · ${seeds.length} puncte-ghid`:''}</small>
+          <small>Architectural V2 · {result.width}×{result.height}px analiză · prag {result.threshold}{guided?` · ${seeds.length} puncte-ghid`:''}</small>
           <small>Poți marca o propunere drept „zonă comună” și detectorul recalculează limitele.</small>
         </div>
 
