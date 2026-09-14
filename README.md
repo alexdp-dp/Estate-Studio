@@ -1,3 +1,41 @@
+# Estate Studio — Build 03.7.14 Clear-Line Perspective Camera
+
+Corecție cameră pe bloc selectat:
+
+- blocul selectat rămâne centrat în cadru;
+- camera este RIDICATĂ, în perspectivă, nu la nivelul blocului;
+- nu mai folosește un unghi diagonal fix;
+- testează 12 unghiuri în jurul blocului;
+- pentru fiecare unghi verifică dacă segmentul cameră → bloc intersectează bounding box-ul altui bloc;
+- alege automat primul cadru curat, fără altă clădire între cameră și blocul selectat;
+- dacă unghiul curent este liber, îl preferă, ca mișcarea să nu facă o rotație inutilă;
+- fly-ul cinematic are arc lateral + lift mai mare, ca traseul să evite senzația de trecere prin clădiri;
+- celelalte blocuri rămân în shade `disabled`, dar nu sunt transparente.
+
+Include cumulativ toate funcțiile și fixurile din 03.7.13.
+
+`/api/version` => `03.7.14-clear-line-perspective-camera`
+
+# Estate Studio — Build 03.7.13 Detector Runtime Fix
+
+Fix critic pentru crash-ul la `Detectează apartamente`.
+
+Cauza exactă:
+- în 03.7.4 am introdus un `useEffect()` care preîncarcă planul pentru Modul asistat;
+- componenta `AutoApartmentDetector.jsx` NU importa `useEffect` din React;
+- componenta este lazy-loaded, deci restul Estate Studio pornea normal;
+- crash-ul apărea exact când deschideai detectorul;
+- în buildul minificat eroarea ajungea afișată ca `TypeError: t is not a function`.
+
+Fix:
+- `useEffect` este importat corect din React;
+- importul `useMemo` nefolosit a fost eliminat;
+- nici algoritmul detectorului, nici datele, nici Supabase nu sunt modificate.
+
+Include cumulativ toate funcțiile și fixurile din 03.7.12.
+
+`/api/version` => `03.7.13-detector-runtime-fix`
+
 # Estate Studio — Build 03.7.12 Centered Angled Focus
 
 Corecție explicită pentru focusul pe bloc:

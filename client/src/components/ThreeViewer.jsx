@@ -391,6 +391,86 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
     );
   }
 
+  function expandedBox(box,pad=.12){
+    return {
+      minX:box.minX-pad,maxX:box.maxX+pad,
+      minY:box.minY-pad,maxY:box.maxY+pad,
+      minZ:box.minZ-pad,maxZ:box.maxZ+pad
+    };
+  }
+
+  function pointInsideBox(p,box){
+    return p.x>=box.minX&&p.x<=box.maxX&&
+           p.y>=box.minY&&p.y<=box.maxY&&
+           p.z>=box.minZ&&p.z<=box.maxZ;
+  }
+
+  // Slab-test: does the camera->target segment cross an AABB?
+  function segmentIntersectsBox(a,b,box){
+    const d=b.clone().sub(a);
+    let tMin=0,tMax=1;
+    for(const [axis,minK,maxK] of [['x','minX','maxX'],['y','minY','maxY'],['z','minZ','maxZ']]){
+      const av=a[axis],dv=d[axis],mn=box[minK],mx=box[maxK];
+      if(Math.abs(dv)<1e-8){
+        if(av<mn||av>mx)return false;
+      }else{
+        let t1=(mn-av)/dv,t2=(mx-av)/dv;
+        if(t1>t2){const tmp=t1;t1=t2;t2=tmp}
+        tMin=Math.max(tMin,t1);
+        tMax=Math.min(tMax,t2);
+        if(tMin>tMax)return false;
+      }
+    }
+    return tMax>0.03 && tMin<.97;
+  }
+
+  function chooseClearPerspectiveDirection(target,distance,height,selectedId){
+    const otherBoxes=Object.entries(boundsMap)
+      .filter(([id])=>id!==selectedId && !id.startsWith('__'))
+      .map(([id,b])=>({id,box:expandedBox(b,Math.max(.12,Math.min(.35,distance*.035)))}));
+
+    const currentDir=camera.position.clone().sub(target);
+    currentDir.y=0;
+    if(currentDir.lengthSq()<.001)currentDir.set(1,0,1);
+    currentDir.normalize();
+
+    const sceneOut=target.clone().sub(sceneCenter);
+    sceneOut.y=0;
+    if(sceneOut.lengthSq()<.001)sceneOut.copy(currentDir);
+    sceneOut.normalize();
+
+    // 12 azimuth candidates. We intentionally allow the camera to orbit far enough
+    // to find a clean line of sight instead of accepting a blocked 45° position.
+    const candidates=[];
+    for(let i=0;i<12;i++){
+      const a=(Math.PI*2*i)/12;
+      const dir=new THREE.Vector3(Math.cos(a),0,Math.sin(a));
+      const cam=target.clone()
+        .add(dir.clone().multiplyScalar(distance))
+        .add(new THREE.Vector3(0,Math.max(height*.34,distance*.20),0));
+
+      let blocked=0;
+      let inside=0;
+      for(const o of otherBoxes){
+        if(pointInsideBox(cam,o.box))inside+=1;
+        if(segmentIntersectsBox(cam,target,o.box))blocked+=1;
+      }
+
+      // Lower score is better:
+      //  - blocked view is heavily penalized
+      //  - being inside another building is essentially forbidden
+      //  - prefer a direction close to the current azimuth
+      //  - slight preference for the outside of the complex
+      const continuity=1-currentDir.dot(dir);
+      const outwardPenalty=(1-sceneOut.dot(dir))*.20;
+      const score=inside*10000+blocked*1000+continuity+outwardPenalty;
+      candidates.push({dir,cam,score,blocked,inside});
+    }
+
+    candidates.sort((a,b)=>a.score-b.score);
+    return candidates[0];
+  }
+
   useEffect(()=>{
     const allReal=Object.entries(boundsMap)
       .filter(([id])=>!id.startsWith('__'))
@@ -416,9 +496,9 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
     // and avoids the "camera aimed at the basement" feeling.
     const target=new THREE.Vector3(
       center.x,
-      // Selected block: exact X/Z centre and visual mid-height.
-      // This keeps the chosen building centered in the final composition.
-      targetBox.minY + height*(selectedBuildingId ? .50 : .43),
+      // Keep the block centred in X/Z; aim slightly below mid-height so an elevated
+      // camera still shows façade + roof instead of looking flat at the building.
+      targetBox.minY + height*(selectedBuildingId ? .46 : .43),
       center.z
     );
 
@@ -439,38 +519,23 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
       camera.up.set(0,1,0);
 
       if(selectedBuildingId){
-        // True oblique 3/4 framing.
-        // We deliberately choose a diagonal camera direction so the building is
-        // never presented dead-front. The selected block stays centered in frame.
-        const diagonals=[
-          new THREE.Vector3( 1,0, 1).normalize(),
-          new THREE.Vector3( 1,0,-1).normalize(),
-          new THREE.Vector3(-1,0, 1).normalize(),
-          new THREE.Vector3(-1,0,-1).normalize()
-        ];
-
-        const currentDir=camera.position.clone().sub(target);
-        currentDir.y=0;
-        if(currentDir.lengthSq()<.001)currentDir.set(1,0,1);
-        currentDir.normalize();
-
-        let heroDir=diagonals[0];
-        let best=-Infinity;
-        for(const d of diagonals){
-          const score=currentDir.dot(d);
-          if(score>best){best=score;heroDir=d}
-        }
-
+        // Clear-line perspective framing:
+        // keep the selected block centered, elevated and in perspective, but orbit
+        // around the complex until no other building is between camera and target.
         const distance=Math.max(
-          Math.max(width,depth)*1.78,
-          height*1.02,
-          2.85
+          Math.max(width,depth)*1.86,
+          height*1.08,
+          3.0
         );
 
-        dest=target.clone()
-          .add(heroDir.clone().multiplyScalar(distance))
-          .add(new THREE.Vector3(0,height*.20,0));
+        const chosen=chooseClearPerspectiveDirection(
+          target,
+          distance,
+          height,
+          selectedBuildingId
+        );
 
+        dest=chosen.cam;
         desiredFov=36;
       }else{
         const sceneSpan=Math.max(
@@ -512,15 +577,15 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
 
       // A shallow arc + slight lift gives the camera a dolly/crane feel instead of
       // a straight mathematical lerp.
-      const arc=Math.max(.35,Math.min(2.2,travel.length()*.16));
+      const arc=Math.max(.45,Math.min(2.8,travel.length()*.20));
       cp1=fromPos.clone()
-        .add(travel.clone().multiplyScalar(.28))
-        .add(side.clone().multiplyScalar(arc))
-        .add(new THREE.Vector3(0,arc*.48,0));
+        .add(travel.clone().multiplyScalar(.24))
+        .add(side.clone().multiplyScalar(arc*.95))
+        .add(new THREE.Vector3(0,Math.max(arc*.72,.45),0));
       cp2=fromPos.clone()
-        .add(travel.clone().multiplyScalar(.73))
-        .add(side.clone().multiplyScalar(-arc*.30))
-        .add(new THREE.Vector3(0,arc*.18,0));
+        .add(travel.clone().multiplyScalar(.70))
+        .add(side.clone().multiplyScalar(arc*.30))
+        .add(new THREE.Vector3(0,Math.max(arc*.38,.25),0));
     }else{
       cp1=fromPos.clone().lerp(dest,.33);
       cp2=fromPos.clone().lerp(dest,.72);
