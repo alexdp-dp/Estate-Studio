@@ -1,3 +1,25 @@
+# Estate Studio — Build 03.7.12 Centered Angled Focus
+
+Corecție explicită pentru focusul pe bloc:
+
+## Când selectezi un bloc
+- blocul selectat este CENTRAT în cadru;
+- camera este obligatoriu la un unghi 3/4 / perspectivă;
+- nu mai poate ajunge într-un cadru aproape frontal;
+- camera alege automat cel mai apropiat dintre 4 unghiuri diagonale (45°), ca mișcarea să rămână naturală;
+- centrul de interes este exact centrul X/Z al bounding box-ului real al blocului;
+- clădirea rămâne complet vizibilă.
+
+## Restul ansamblului
+- celelalte blocuri rămân vizibile;
+- sunt desaturate și trecute într-un shade gri deschis de `disabled`;
+- blocul activ își păstrează materialele/culorile normale;
+- funcționează atât pentru GLB separat per bloc, cât și pentru GLB comun mapat.
+
+Include cumulativ toate funcțiile și fixurile din 03.7.11.
+
+`/api/version` => `03.7.12-centered-angled-focus-disabled-others`
+
 # Estate Studio — Build 03.7.11 Camera Framing Tune
 
 Ajustări cameră viewer public:

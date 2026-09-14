@@ -303,3 +303,9 @@ a.primary:hover,
 .macheta-wrap .viewer-bottom{
   backdrop-filter:blur(10px);
 }
+
+/* 03.7.12 — centered 3/4 block focus + disabled surrounding ensemble */
+.macheta-nav button.active{
+  background:rgba(7,144,74,.09);
+  box-shadow:inset 3px 0 0 #07904a;
+}

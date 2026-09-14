@@ -84,11 +84,23 @@ function IndividualBuilding({building,selectedBuildingId,selectedFloor,hoveredFl
       if(!o.userData.esOriginal)o.userData.esOriginal=o.material;
       const original=o.userData.esOriginal;
       const m=(Array.isArray(original)?original[0]:original).clone();
-      m.transparent=true;m.opacity=dimOthers?.20:1;
+      m.transparent=true;
+      m.opacity=1;
       m.onBeforeCompile=s=>{
         s.uniforms.uMin={value:floorMin};s.uniforms.uMax={value:floorMax};s.uniforms.uHasFloor={value:effectiveFloor?1:0};s.uniforms.uHover={value:hovered?1:0};
         s.vertexShader=s.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vEstateWorld;').replace('#include <worldpos_vertex>','#include <worldpos_vertex>\nvEstateWorld=(modelMatrix*vec4(transformed,1.0)).xyz;');
-        s.fragmentShader=s.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vEstateWorld; uniform float uMin; uniform float uMax; uniform float uHasFloor; uniform float uHover;').replace('#include <dithering_fragment>',`if(uHasFloor>.5&&vEstateWorld.y>=uMin&&vEstateWorld.y<=uMax){gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(.04,.88,.39),.76);gl_FragColor.a=1.;}else if(uHover>.5&&uHasFloor<.5){gl_FragColor.rgb=vec3(1.)-gl_FragColor.rgb*.52;}#include <dithering_fragment>`);
+        s.uniforms.uDisabled={value:dimOthers?1:0};
+        s.fragmentShader=s.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vEstateWorld; uniform float uMin; uniform float uMax; uniform float uHasFloor; uniform float uHover; uniform float uDisabled;').replace('#include <dithering_fragment>',`
+          if(uDisabled>.5){
+            float lum=dot(gl_FragColor.rgb,vec3(.299,.587,.114));
+            gl_FragColor.rgb=mix(vec3(lum),vec3(.82,.84,.83),.58);
+          }else if(uHasFloor>.5&&vEstateWorld.y>=uMin&&vEstateWorld.y<=uMax){
+            gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(.04,.88,.39),.76);
+            gl_FragColor.a=1.;
+          }else if(uHover>.5&&uHasFloor<.5){
+            gl_FragColor.rgb=vec3(1.)-gl_FragColor.rgb*.52;
+          }
+          #include <dithering_fragment>`);
       };m.needsUpdate=true;o.material=m;
     });
     return()=>clone.traverse(o=>{if(o.isMesh&&o.userData.esOriginal)o.material=o.userData.esOriginal});
@@ -228,18 +240,26 @@ function SharedComplex({url,cfg,buildings,selectedBuildingId,selectedFloor,hover
         s.uniforms.uNodeMatch={value:belongs?1:0};
         s.uniforms.uUseNodes={value:nodeSet.size?1:0};
         s.uniforms.uHasFp={value:fp?1:0};
+        s.uniforms.uHasSelectedBuilding={value:activeBuilding?1:0};
         s.uniforms.uFp={value:new THREE.Vector4(fp?.minX??0,fp?.maxX??0,fp?.minZ??0,fp?.maxZ??0)};
         s.vertexShader=s.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vEstateWorld;').replace('#include <worldpos_vertex>','#include <worldpos_vertex>\nvEstateWorld=(modelMatrix*vec4(transformed,1.0)).xyz;');
-        s.fragmentShader=s.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vEstateWorld; uniform float uMin; uniform float uMax; uniform float uHasFloor; uniform float uHoverBuilding; uniform float uNodeMatch; uniform float uUseNodes; uniform float uHasFp; uniform vec4 uFp;').replace('#include <dithering_fragment>',`
+        s.fragmentShader=s.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vEstateWorld; uniform float uMin; uniform float uMax; uniform float uHasFloor; uniform float uHoverBuilding; uniform float uNodeMatch; uniform float uUseNodes; uniform float uHasFp; uniform float uHasSelectedBuilding; uniform vec4 uFp;').replace('#include <dithering_fragment>',`
           float inFp=step(uFp.x,vEstateWorld.x)*step(vEstateWorld.x,uFp.y)*step(uFp.z,vEstateWorld.z)*step(vEstateWorld.z,uFp.w);
           float belongsBuilding=max(uUseNodes*uNodeMatch,(1.0-uUseNodes)*uHasFp*inFp);
-          if(uHasFloor>.5&&belongsBuilding>.5&&vEstateWorld.y>=uMin&&vEstateWorld.y<=uMax){gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(.04,.88,.39),.78);}
-          else if(uHoverBuilding>.5&&belongsBuilding>.5&&uHasFloor<.5){gl_FragColor.rgb=vec3(1.)-gl_FragColor.rgb*.52;}
+
+          if(uHasSelectedBuilding>.5 && belongsBuilding<.5){
+            float lum=dot(gl_FragColor.rgb,vec3(.299,.587,.114));
+            gl_FragColor.rgb=mix(vec3(lum),vec3(.82,.84,.83),.58);
+          }else if(uHasFloor>.5&&belongsBuilding>.5&&vEstateWorld.y>=uMin&&vEstateWorld.y<=uMax){
+            gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(.04,.88,.39),.78);
+          }else if(uHoverBuilding>.5&&belongsBuilding>.5&&uHasFloor<.5){
+            gl_FragColor.rgb=vec3(1.)-gl_FragColor.rgb*.52;
+          }
           #include <dithering_fragment>`);
       };m.needsUpdate=true;o.material=m;
     });
     return()=>clone.traverse(o=>{if(o.isMesh&&o.userData.esOriginal)o.material=o.userData.esOriginal});
-  },[clone,floorMin,floorMax,focusBuilding?.id,activeFloor?.id,hoveredBuilding?.id,JSON.stringify(fp),[...nodeSet].join('|')]);
+  },[clone,floorMin,floorMax,focusBuilding?.id,activeBuilding?.id,activeFloor?.id,hoveredBuilding?.id,JSON.stringify(fp),[...nodeSet].join('|')]);
 
   function findBuilding(e){
     const byNode=mappingForObject(e.object,buildings);
@@ -396,9 +416,9 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
     // and avoids the "camera aimed at the basement" feeling.
     const target=new THREE.Vector3(
       center.x,
-      // For a selected building, look a bit lower on the façade so the final frame
-      // keeps the whole block in view instead of pushing too much into the balconies.
-      targetBox.minY + height*(selectedBuildingId ? .46 : .43),
+      // Selected block: exact X/Z centre and visual mid-height.
+      // This keeps the chosen building centered in the final composition.
+      targetBox.minY + height*(selectedBuildingId ? .50 : .43),
       center.z
     );
 
@@ -419,40 +439,39 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
       camera.up.set(0,1,0);
 
       if(selectedBuildingId){
-        // 3/4 hero framing:
-        // keep the selected building fully visible, but NEVER approach it straight-on.
-        let outward=new THREE.Vector3(center.x-sceneCenter.x,0,center.z-sceneCenter.z);
-        if(outward.lengthSq()<.04){
-          outward=camera.position.clone().sub(target);
-          outward.y=0;
-        }
-        if(outward.lengthSq()<.04)outward.set(1,0,1);
-        outward.normalize();
+        // True oblique 3/4 framing.
+        // We deliberately choose a diagonal camera direction so the building is
+        // never presented dead-front. The selected block stays centered in frame.
+        const diagonals=[
+          new THREE.Vector3( 1,0, 1).normalize(),
+          new THREE.Vector3( 1,0,-1).normalize(),
+          new THREE.Vector3(-1,0, 1).normalize(),
+          new THREE.Vector3(-1,0,-1).normalize()
+        ];
 
-        const tangent=new THREE.Vector3(-outward.z,0,outward.x);
-
-        // Pick the tangent side that is closest to the camera's current azimuth,
-        // so the move stays cinematic and doesn't orbit unnecessarily around the block.
         const currentDir=camera.position.clone().sub(target);
         currentDir.y=0;
-        if(currentDir.lengthSq()<.001)currentDir.copy(outward);
+        if(currentDir.lengthSq()<.001)currentDir.set(1,0,1);
         currentDir.normalize();
 
-        const sideA=outward.clone().add(tangent.clone().multiplyScalar(.38)).normalize();
-        const sideB=outward.clone().add(tangent.clone().multiplyScalar(-.38)).normalize();
-        const heroDir=currentDir.dot(sideA)>=currentDir.dot(sideB)?sideA:sideB;
+        let heroDir=diagonals[0];
+        let best=-Infinity;
+        for(const d of diagonals){
+          const score=currentDir.dot(d);
+          if(score>best){best=score;heroDir=d}
+        }
 
         const distance=Math.max(
-          Math.max(width,depth)*1.88,
-          height*1.04,
-          3.0
+          Math.max(width,depth)*1.78,
+          height*1.02,
+          2.85
         );
 
         dest=target.clone()
-          .add(heroDir.multiplyScalar(distance))
-          .add(new THREE.Vector3(0,height*.22,0));
+          .add(heroDir.clone().multiplyScalar(distance))
+          .add(new THREE.Vector3(0,height*.20,0));
 
-        desiredFov=36.5;
+        desiredFov=36;
       }else{
         const sceneSpan=Math.max(
           sceneBox.maxX-sceneBox.minX,
