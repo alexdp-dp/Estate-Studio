@@ -1,4 +1,4 @@
-import React,{Suspense,useEffect,useMemo,useRef,useState} from 'react';
+import React,{Suspense,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {Canvas,useFrame,useThree} from '@react-three/fiber';
 import {Environment,Html,OrbitControls,useGLTF} from '@react-three/drei';
 import * as THREE from 'three';
@@ -30,6 +30,13 @@ function mappingForObject(object,buildings){
   return null;
 }
 
+function boxToPlain(box){
+  if(!box || box.isEmpty())return null;
+  const vals=[box.min.x,box.max.x,box.min.y,box.max.y,box.min.z,box.max.z];
+  if(vals.some(v=>!Number.isFinite(v)))return null;
+  return {minX:box.min.x,maxX:box.max.x,minY:box.min.y,maxY:box.max.y,minZ:box.min.z,maxZ:box.max.z};
+}
+
 function BuildingBubble({building,position,onClick,active=false}){
   if(!position)return null;
   return <Html position={position} center distanceFactor={8} zIndexRange={[12,0]}>
@@ -39,7 +46,8 @@ function BuildingBubble({building,position,onClick,active=false}){
   </Html>
 }
 
-function IndividualBuilding({building,selectedFloor,hoveredFloor,hovered,onHover,onLeave,onSelectBuilding,onSelectFloor,dimOthers,showBubble,bubbleActive,onBounds}){
+function IndividualBuilding({building,selectedBuildingId,selectedFloor,hoveredFloor,hovered,onHover,onLeave,onSelectBuilding,onSelectFloor,dimOthers,onBounds}){
+  const groupRef=useRef();
   const {scene}=useGLTF(building.model_path);
   const clone=useMemo(()=>scene.clone(true),[scene]);
   const info=axisInfo(building.model_up_axis);
@@ -58,15 +66,17 @@ function IndividualBuilding({building,selectedFloor,hoveredFloor,hovered,onHover
   const floorMin=effectiveFloor?baseY+(Number(effectiveFloor.height_from_m)||0)*unitPerMeter:-99999;
   const floorMax=effectiveFloor?baseY+(Number(effectiveFloor.height_to_m)||0)*unitPerMeter:-99998;
 
-  const bubblePos=useMemo(()=>{
-    const y=baseY+(Number(building.display_height_units)||2.7)+.28;
-    return [Number(building.position_x)||0,y,Number(building.position_z)||0];
-  },[building.position_x,building.position_y,building.position_z,building.display_height_units]);
 
-  useEffect(()=>{
-    const width=Math.max(.8,metrics.display*.65),depth=width;
-    onBounds?.(building.id,{minX:(Number(building.position_x)||0)-width/2,maxX:(Number(building.position_x)||0)+width/2,minZ:(Number(building.position_z)||0)-depth/2,maxZ:(Number(building.position_z)||0)+depth/2,minY:baseY,maxY:baseY+metrics.display});
-  },[building.id,building.position_x,building.position_z,baseY,metrics.display,onBounds]);
+  useLayoutEffect(()=>{
+    if(!groupRef.current)return;
+    groupRef.current.updateWorldMatrix(true,true);
+    const actual=boxToPlain(new THREE.Box3().setFromObject(groupRef.current));
+    if(actual)onBounds?.(building.id,actual);
+  },[
+    clone,metrics.scale,
+    building.id,building.position_x,building.position_y,building.position_z,building.rotation_y_deg,
+    building.model_up_axis,building.auto_ground,onBounds
+  ]);
 
   useEffect(()=>{
     clone.traverse(o=>{
@@ -86,21 +96,46 @@ function IndividualBuilding({building,selectedFloor,hoveredFloor,hovered,onHover
 
   function hover(e){
     e.stopPropagation();
-    onHover?.({building,floor:floorAtWorldY(building,e.point.y,unitPerMeter,baseY),clientX:e.nativeEvent?.clientX??0,clientY:e.nativeEvent?.clientY??0});
-  }
-  function click(e){
-    e.stopPropagation();
-    const floor=floorAtWorldY(building,e.point.y,unitPerMeter,baseY);
-    onSelectBuilding?.(building);if(floor)onSelectFloor?.(floor,building);
+
+    // STAGE 1 — overview:
+    // while the building is not the active building, hover applies to the whole block.
+    // No floor is exposed/selectable yet.
+    const isActive=selectedBuildingId===building.id;
+    const floor=isActive
+      ? floorAtWorldY(building,e.point.y,unitPerMeter,baseY)
+      : null;
+
+    onHover?.({
+      building,
+      floor,
+      stage:isActive?'floor':'building',
+      clientX:e.nativeEvent?.clientX??0,
+      clientY:e.nativeEvent?.clientY??0
+    });
   }
 
-  return <group position={[Number(building.position_x)||0,baseY,Number(building.position_z)||0]} rotation={[info.rotation[0],info.rotation[1]+THREE.MathUtils.degToRad(Number(building.rotation_y_deg)||0),info.rotation[2]]} onPointerMove={hover} onPointerOver={hover} onPointerOut={e=>{e.stopPropagation();onLeave?.(building)}} onClick={click}>
+  function click(e){
+    e.stopPropagation();
+    const isActive=selectedBuildingId===building.id;
+
+    // First click always selects/focuses the building only.
+    if(!isActive){
+      onSelectBuilding?.(building);
+      return;
+    }
+
+    // Only after the building is already focused can a floor be selected.
+    const floor=floorAtWorldY(building,e.point.y,unitPerMeter,baseY);
+    if(floor)onSelectFloor?.(floor,building);
+  }
+
+  return <group ref={groupRef} position={[Number(building.position_x)||0,baseY,Number(building.position_z)||0]} rotation={[info.rotation[0],info.rotation[1]+THREE.MathUtils.degToRad(Number(building.rotation_y_deg)||0),info.rotation[2]]} onPointerMove={hover} onPointerOver={hover} onPointerOut={e=>{e.stopPropagation();onLeave?.(building)}} onClick={click}>
     <primitive object={clone} scale={metrics.scale} position={shift}/>
-    {showBubble&&<BuildingBubble building={building} position={[0,(Number(building.display_height_units)||2.7)+.35,0]} active={bubbleActive} onClick={onSelectBuilding}/>}
   </group>
 }
 
-function SharedComplex({url,cfg,buildings,selectedBuildingId,selectedFloor,hoverInfo,onHover,onLeave,onSelectBuilding,onSelectFloor,showBubbles,onBounds}){
+function SharedComplex({url,cfg,buildings,selectedBuildingId,selectedFloor,hoverInfo,onHover,onLeave,onSelectBuilding,onSelectFloor,onBounds}){
+  const groupRef=useRef();
   const {scene}=useGLTF(url);
   const clone=useMemo(()=>scene.clone(true),[scene]);
   const info=axisInfo(cfg.up_axis||'Y');
@@ -122,13 +157,43 @@ function SharedComplex({url,cfg,buildings,selectedBuildingId,selectedFloor,hover
   const floorMin=focusBuilding&&activeFloor?(Number(focusBuilding.position_y)||0)+(Number(activeFloor.height_from_m)||0)*unitPerMeter:-99999;
   const floorMax=focusBuilding&&activeFloor?(Number(focusBuilding.position_y)||0)+(Number(activeFloor.height_to_m)||0)*unitPerMeter:-99998;
 
-  useEffect(()=>{
+  useLayoutEffect(()=>{
+    if(!groupRef.current)return;
+    groupRef.current.updateWorldMatrix(true,true);
+
+    const sceneBounds=boxToPlain(new THREE.Box3().setFromObject(groupRef.current));
+    if(sceneBounds)onBounds?.('__scene',sceneBounds);
+
     for(const b of buildings){
-      const m=b.settings?.shared_mapping||{};
-      const f=m.footprint;
-      if(f)onBounds?.(b.id,{minX:Number(f.minX),maxX:Number(f.maxX),minZ:Number(f.minZ),maxZ:Number(f.maxZ),minY:Number(b.position_y)||0,maxY:(Number(b.position_y)||0)+(Number(b.real_height_m)||27)*unitPerMeter});
+      const map=b.settings?.shared_mapping||{};
+      const nodeNames=map.node_names||[];
+
+      if(nodeNames.length){
+        const wanted=new Set(nodeNames);
+        const union=new THREE.Box3();
+        let found=false;
+        clone.traverse(o=>{
+          if(!wanted.has(o.name))return;
+          const bb=new THREE.Box3().setFromObject(o);
+          if(!bb.isEmpty()){union.union(bb);found=true}
+        });
+        if(found){
+          const actual=boxToPlain(union);
+          if(actual){onBounds?.(b.id,actual);continue}
+        }
+      }
+
+      const f=map.footprint;
+      if(f){
+        onBounds?.(b.id,{
+          minX:Number(f.minX),maxX:Number(f.maxX),
+          minZ:Number(f.minZ),maxZ:Number(f.maxZ),
+          minY:Number(b.position_y)||sceneBounds?.minY||0,
+          maxY:(Number(b.position_y)||0)+(Number(b.real_height_m)||27)*unitPerMeter
+        });
+      }
     }
-  },[buildings,unitPerMeter,onBounds]);
+  },[clone,buildings,unitPerMeter,onBounds,cfg.up_axis,cfg.display_height_units,cfg.auto_ground]);
 
   useEffect(()=>{
     clone.traverse(o=>{
@@ -167,59 +232,282 @@ function SharedComplex({url,cfg,buildings,selectedBuildingId,selectedFloor,hover
     e.stopPropagation();
     const b=findBuilding(e);
     if(!b){onLeave?.();return}
-    const floor=floorAtWorldY(b,e.point.y,unitPerMeter,Number(b.position_y)||0);
-    onHover?.({building:b,floor,clientX:e.nativeEvent?.clientX??0,clientY:e.nativeEvent?.clientY??0});
-  }
-  function click(e){
-    e.stopPropagation();
-    const b=findBuilding(e);if(!b)return;
-    const floor=floorAtWorldY(b,e.point.y,unitPerMeter,Number(b.position_y)||0);
-    onSelectBuilding?.(b);if(floor)onSelectFloor?.(floor,b);
+
+    const isActive=selectedBuildingId===b.id;
+    const floor=isActive
+      ? floorAtWorldY(b,e.point.y,unitPerMeter,Number(b.position_y)||0)
+      : null;
+
+    onHover?.({
+      building:b,
+      floor,
+      stage:isActive?'floor':'building',
+      clientX:e.nativeEvent?.clientX??0,
+      clientY:e.nativeEvent?.clientY??0
+    });
   }
 
-  return <group rotation={info.rotation} onPointerMove={hover} onPointerOver={hover} onPointerOut={()=>onLeave?.()} onClick={click}>
+  function click(e){
+    e.stopPropagation();
+    const b=findBuilding(e);
+    if(!b)return;
+
+    const isActive=selectedBuildingId===b.id;
+
+    // Stage 1: select the building, trigger cinematic focus, do not select a floor.
+    if(!isActive){
+      onSelectBuilding?.(b);
+      return;
+    }
+
+    // Stage 2: only the already focused building exposes/selects floors.
+    const floor=floorAtWorldY(b,e.point.y,unitPerMeter,Number(b.position_y)||0);
+    if(floor)onSelectFloor?.(floor,b);
+  }
+
+  return <group ref={groupRef} rotation={info.rotation} onPointerMove={hover} onPointerOver={hover} onPointerOut={()=>onLeave?.()} onClick={click}>
     <primitive object={clone} scale={metrics.scale} position={shift}/>
-    {showBubbles&&buildings.map((b,i)=>{
-      const map=b.settings?.shared_mapping||{},f=map.footprint,l=map.label;
-      const x=l?.x??(f?(Number(f.minX)+Number(f.maxX))/2:(i-(buildings.length-1)/2)*2.5);
-      const z=l?.z??(f?(Number(f.minZ)+Number(f.maxZ))/2:0);
-      const y=l?.y??((Number(b.real_height_m)||27)*unitPerMeter+.35);
-      return <BuildingBubble key={b.id} building={b} position={[x,y,z]} active={b.id===selectedBuildingId} onClick={onSelectBuilding}/>;
-    })}
   </group>
 }
 
-function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsRef}){
+
+function BuildingBubbleLayer({buildings,boundsMap,selectedBuildingId,onSelectBuilding}){
+  return <>
+    {buildings.map(building=>{
+      const box=boundsMap[building.id];
+      if(!box)return null;
+
+      const width=Math.max(.001,box.maxX-box.minX);
+      const height=Math.max(.001,box.maxY-box.minY);
+      const depth=Math.max(.001,box.maxZ-box.minZ);
+
+      // Position comes only from the final world-space bounding box of the actual
+      // rendered geometry. No model origin / GLB pivot / mapper label is used.
+      const position=[
+        (box.minX+box.maxX)/2,
+        box.maxY + Math.max(.12,Math.min(.45,height*.08)),
+        (box.minZ+box.maxZ)/2
+      ];
+
+      return <BuildingBubble
+        key={building.id}
+        building={building}
+        position={position}
+        active={building.id===selectedBuildingId}
+        onClick={onSelectBuilding}
+      />;
+    })}
+  </>;
+}
+
+function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsRef,focusTick=0,cinematic=false}){
   const {camera}=useThree();
   const anim=useRef(null);
+  const previousSelection=useRef(selectedBuildingId);
+
+  function easeInOutQuint(t){
+    return t<.5 ? 16*t*t*t*t*t : 1-Math.pow(-2*t+2,5)/2;
+  }
+  function cubicBezier(a,b,c,d,t){
+    const it=1-t;
+    return a.clone().multiplyScalar(it*it*it)
+      .add(b.clone().multiplyScalar(3*it*it*t))
+      .add(c.clone().multiplyScalar(3*it*t*t))
+      .add(d.clone().multiplyScalar(t*t*t));
+  }
+  function unionBounds(boxes){
+    if(!boxes.length)return null;
+    return {
+      minX:Math.min(...boxes.map(b=>b.minX)),
+      maxX:Math.max(...boxes.map(b=>b.maxX)),
+      minY:Math.min(...boxes.map(b=>b.minY)),
+      maxY:Math.max(...boxes.map(b=>b.maxY)),
+      minZ:Math.min(...boxes.map(b=>b.minZ)),
+      maxZ:Math.max(...boxes.map(b=>b.maxZ))
+    };
+  }
+  function boxCenter(box){
+    return new THREE.Vector3(
+      (box.minX+box.maxX)/2,
+      (box.minY+box.maxY)/2,
+      (box.minZ+box.maxZ)/2
+    );
+  }
 
   useEffect(()=>{
-    let boxes=[];
-    if(selectedBuildingId&&boundsMap[selectedBuildingId])boxes=[boundsMap[selectedBuildingId]];
-    else boxes=Object.values(boundsMap);
-    if(!boxes.length){
-      boxes=buildings.map((b,i)=>({minX:(Number(b.position_x)||i*3)-1,maxX:(Number(b.position_x)||i*3)+1,minZ:(Number(b.position_z)||0)-1,maxZ:(Number(b.position_z)||0)+1,minY:0,maxY:Number(b.display_height_units)||2.7}));
+    const allReal=Object.entries(boundsMap)
+      .filter(([id])=>!id.startsWith('__'))
+      .map(([,b])=>b);
+    const sceneBox=boundsMap.__scene || unionBounds(allReal);
+    if(!sceneBox)return;
+
+    const sceneCenter=boxCenter(sceneBox);
+    let targetBox=sceneBox;
+
+    if(selectedBuildingId){
+      targetBox=boundsMap[selectedBuildingId];
+      if(!targetBox)return;
     }
-    const minX=Math.min(...boxes.map(b=>b.minX)),maxX=Math.max(...boxes.map(b=>b.maxX)),minZ=Math.min(...boxes.map(b=>b.minZ)),maxZ=Math.max(...boxes.map(b=>b.maxZ)),minY=Math.min(...boxes.map(b=>b.minY)),maxY=Math.max(...boxes.map(b=>b.maxY));
-    const center=new THREE.Vector3((minX+maxX)/2,(minY+maxY)/2,(minZ+maxZ)/2);
-    const span=Math.max(maxX-minX,maxZ-minZ,maxY-minY,1);
-    const distance=span*(selectedBuildingId?2.15:1.85)+1.5;
+
+    const center=boxCenter(targetBox);
+    const width=Math.max(.001,targetBox.maxX-targetBox.minX);
+    const height=Math.max(.001,targetBox.maxY-targetBox.minY);
+    const depth=Math.max(.001,targetBox.maxZ-targetBox.minZ);
+    const span=Math.max(width,depth,height*.72,1);
+
+    // Look slightly above the geometric center. This frames the façade more naturally
+    // and avoids the "camera aimed at the basement" feeling.
+    const target=new THREE.Vector3(
+      center.x,
+      targetBox.minY + height*(selectedBuildingId ? .52 : .43),
+      center.z
+    );
+
     let dest;
-    if(preset==='top')dest=new THREE.Vector3(center.x,center.y+distance*1.45,center.z+.001);
-    else if(preset==='front')dest=new THREE.Vector3(center.x,center.y+span*.18,center.z+distance);
-    else dest=new THREE.Vector3(center.x+distance*.88,center.y+distance*.48,center.z+distance*.95);
-    anim.current={t:0,fromPos:camera.position.clone(),toPos:dest,fromTarget:controlsRef.current?.target.clone()||center.clone(),toTarget:center};
-  },[selectedBuildingId,preset,JSON.stringify(boundsMap),buildings.length,camera,controlsRef]);
+    let desiredFov=38;
+
+    if(preset==='top'){
+      const distance=Math.max(span*2.05,3.2);
+      dest=new THREE.Vector3(target.x,targetBox.maxY+distance,target.z+.001);
+      desiredFov=selectedBuildingId?34:38;
+      camera.up.set(0,0,-1);
+    }else if(preset==='front'){
+      const distance=Math.max(span*(selectedBuildingId?1.75:2.0),3.0);
+      dest=new THREE.Vector3(target.x,target.y+height*.05,target.z+distance);
+      desiredFov=selectedBuildingId?33.5:38;
+      camera.up.set(0,1,0);
+    }else{
+      camera.up.set(0,1,0);
+
+      if(selectedBuildingId){
+        // Approach the building from the side facing away from the centre of the
+        // residential complex. This gives a clean hero shot and reduces the chance
+        // of flying through neighbouring blocks.
+        let outward=new THREE.Vector3(center.x-sceneCenter.x,0,center.z-sceneCenter.z);
+        if(outward.lengthSq()<.04){
+          outward=camera.position.clone().sub(target);outward.y=0;
+        }
+        if(outward.lengthSq()<.04)outward.set(1,0,1);
+        outward.normalize();
+
+        const tangent=new THREE.Vector3(-outward.z,0,outward.x);
+        const distance=Math.max(
+          Math.max(width,depth)*1.40,
+          height*.92,
+          2.25
+        );
+
+        dest=target.clone()
+          .add(outward.multiplyScalar(distance))
+          .add(tangent.multiplyScalar(distance*.16))
+          .add(new THREE.Vector3(0,height*.16,0));
+
+        desiredFov=32.5;
+      }else{
+        const sceneSpan=Math.max(
+          sceneBox.maxX-sceneBox.minX,
+          sceneBox.maxZ-sceneBox.minZ,
+          sceneBox.maxY-sceneBox.minY,
+          1
+        );
+        const distance=sceneSpan*1.55+1.2;
+        dest=new THREE.Vector3(
+          target.x+distance*.80,
+          target.y+distance*.45,
+          target.z+distance*.90
+        );
+        desiredFov=38;
+      }
+    }
+
+    const fromPos=camera.position.clone();
+    const fromTarget=controlsRef.current?.target.clone()||sceneCenter.clone();
+    const selectionChanged=previousSelection.current!==selectedBuildingId;
+    previousSelection.current=selectedBuildingId;
+
+    const isCinematic=cinematic && selectionChanged && preset==='perspective';
+    const duration=isCinematic
+      ? (selectedBuildingId ? 1.75 : 1.45)
+      : (cinematic ? .95 : .68);
+
+    let cp1,cp2;
+    if(isCinematic){
+      const travel=dest.clone().sub(fromPos);
+      const horizontal=new THREE.Vector3(travel.x,0,travel.z);
+      const side=horizontal.lengthSq()>.001
+        ? new THREE.Vector3(-horizontal.z,0,horizontal.x).normalize()
+        : new THREE.Vector3(1,0,0);
+
+      // A shallow arc + slight lift gives the camera a dolly/crane feel instead of
+      // a straight mathematical lerp.
+      const arc=Math.max(.35,Math.min(2.2,travel.length()*.16));
+      cp1=fromPos.clone()
+        .add(travel.clone().multiplyScalar(.28))
+        .add(side.clone().multiplyScalar(arc))
+        .add(new THREE.Vector3(0,arc*.48,0));
+      cp2=fromPos.clone()
+        .add(travel.clone().multiplyScalar(.73))
+        .add(side.clone().multiplyScalar(-arc*.30))
+        .add(new THREE.Vector3(0,arc*.18,0));
+    }else{
+      cp1=fromPos.clone().lerp(dest,.33);
+      cp2=fromPos.clone().lerp(dest,.72);
+    }
+
+    if(controlsRef.current)controlsRef.current.enabled=false;
+
+    anim.current={
+      elapsed:0,
+      duration,
+      fromPos,
+      cp1,
+      cp2,
+      toPos:dest,
+      fromTarget,
+      toTarget:target,
+      fromFov:camera.fov,
+      toFov:desiredFov
+    };
+  },[
+    selectedBuildingId,preset,focusTick,JSON.stringify(boundsMap),
+    camera,controlsRef,cinematic
+  ]);
 
   useFrame((_,dt)=>{
-    const a=anim.current;if(!a)return;
-    a.t=Math.min(1,a.t+dt/0.78);
-    const k=1-Math.pow(1-a.t,3);
-    camera.position.lerpVectors(a.fromPos,a.toPos,k);
-    if(controlsRef.current){controlsRef.current.target.lerpVectors(a.fromTarget,a.toTarget,k);controlsRef.current.update()}
-    camera.lookAt(controlsRef.current?.target||a.toTarget);
-    if(a.t>=1)anim.current=null;
+    const a=anim.current;
+    if(!a)return;
+
+    a.elapsed=Math.min(a.duration,a.elapsed+dt);
+    const raw=a.duration>0?a.elapsed/a.duration:1;
+    const k=easeInOutQuint(raw);
+
+    camera.position.copy(cubicBezier(a.fromPos,a.cp1,a.cp2,a.toPos,k));
+
+    const target=a.fromTarget.clone().lerp(a.toTarget,k);
+    if(controlsRef.current){
+      controlsRef.current.target.copy(target);
+    }
+
+    camera.fov=THREE.MathUtils.lerp(a.fromFov,a.toFov,k);
+    camera.updateProjectionMatrix();
+    camera.lookAt(target);
+
+    if(raw>=1){
+      if(controlsRef.current){
+        controlsRef.current.target.copy(a.toTarget);
+        controlsRef.current.enabled=true;
+        controlsRef.current.update();
+      }
+      camera.position.copy(a.toPos);
+      camera.fov=a.toFov;
+      camera.updateProjectionMatrix();
+      camera.lookAt(a.toTarget);
+      anim.current=null;
+    }
   });
+
+  useEffect(()=>()=>{if(controlsRef.current)controlsRef.current.enabled=true},[controlsRef]);
+
   return null;
 }
 
@@ -241,14 +529,19 @@ export default function ThreeViewer({
   const [autoRotate,setAutoRotate]=useState(false);
   const [hoverInfo,setHoverInfo]=useState(null);
   const [boundsMap,setBoundsMap]=useState({});
-  const setBound=(id,b)=>setBoundsMap(v=>{const prev=v[id];if(prev&&JSON.stringify(prev)===JSON.stringify(b))return v;return {...v,[id]:b}});
+  const [focusTick,setFocusTick]=useState(0);
+  const setBound=(id,b)=>setBoundsMap(v=>{
+    const prev=v[id];
+    if(prev&&Math.abs(prev.minX-b.minX)<.0001&&Math.abs(prev.maxX-b.maxX)<.0001&&Math.abs(prev.minY-b.minY)<.0001&&Math.abs(prev.maxY-b.maxY)<.0001&&Math.abs(prev.minZ-b.minZ)<.0001&&Math.abs(prev.maxZ-b.maxZ)<.0001)return v;
+    return {...v,[id]:b};
+  });
 
   function zoom(factor){
     const c=controls.current;if(!c)return;
     const cam=c.object,v=cam.position.clone().sub(c.target).multiplyScalar(factor);
     cam.position.copy(c.target.clone().add(v));c.update();
   }
-  function reset(){setPreset('perspective');setBoundsMap(v=>({...v}))}
+  function reset(){setPreset('perspective');setFocusTick(v=>v+1)}
   useEffect(()=>{onReady?.({setPreset,setAutoRotate,zoom,reset,controls})},[onReady]);
 
   const individual=buildings.filter(b=>b.model_path);
@@ -261,18 +554,23 @@ export default function ThreeViewer({
       <ambientLight intensity={1.48}/><directionalLight castShadow position={[7,11,6]} intensity={2.15}/>
       <Suspense fallback={null}>
         {hasShared
-          ? <SharedComplex url={sharedModel.url} cfg={sharedModel} buildings={buildings} selectedBuildingId={selectedBuildingId} selectedFloor={selectedFloor} hoverInfo={hoverInfo} onHover={setHoverInfo} onLeave={()=>setHoverInfo(null)} onSelectBuilding={onSelectBuilding} onSelectFloor={onSelectFloor} showBubbles={showBubbles} onBounds={setBound}/>
-          : individual.map(b=><IndividualBuilding key={b.id} building={b} selectedFloor={b.id===selectedBuildingId?selectedFloor:null} hoveredFloor={hoverInfo?.building?.id===b.id?hoverInfo.floor:null} hovered={hoverInfo?.building?.id===b.id} onHover={setHoverInfo} onLeave={bb=>setHoverInfo(v=>v?.building?.id===bb.id?null:v)} onSelectBuilding={onSelectBuilding} onSelectFloor={onSelectFloor} dimOthers={!!selectedBuildingId&&b.id!==selectedBuildingId} showBubble={showBubbles} bubbleActive={b.id===selectedBuildingId} onBounds={setBound}/>)
+          ? <SharedComplex url={sharedModel.url} cfg={sharedModel} buildings={buildings} selectedBuildingId={selectedBuildingId} selectedFloor={selectedFloor} hoverInfo={hoverInfo} onHover={setHoverInfo} onLeave={()=>setHoverInfo(null)} onSelectBuilding={onSelectBuilding} onSelectFloor={onSelectFloor} onBounds={setBound}/>
+          : individual.map(b=><IndividualBuilding key={b.id} building={b} selectedBuildingId={selectedBuildingId} selectedFloor={b.id===selectedBuildingId?selectedFloor:null} hoveredFloor={hoverInfo?.building?.id===b.id?hoverInfo.floor:null} hovered={hoverInfo?.building?.id===b.id} onHover={setHoverInfo} onLeave={bb=>setHoverInfo(v=>v?.building?.id===bb.id?null:v)} onSelectBuilding={onSelectBuilding} onSelectFloor={onSelectFloor} dimOthers={!!selectedBuildingId&&b.id!==selectedBuildingId} onBounds={setBound}/>)
         }
+        {showBubbles&&<BuildingBubbleLayer buildings={buildings} boundsMap={boundsMap} selectedBuildingId={selectedBuildingId} onSelectBuilding={onSelectBuilding}/>}
         <Environment preset="city"/>
       </Suspense>
       {showGrid&&!publicMode&&<gridHelper args={[20,40,'#aeb6b1','#d3d8d5']} position={[0,-.001,0]}/>}
       <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={.08} autoRotate={autoRotate} autoRotateSpeed={.65} minDistance={.7} maxDistance={80}/>
-      <CameraDirector buildings={buildings} boundsMap={boundsMap} selectedBuildingId={selectedBuildingId} preset={preset} controlsRef={controls}/>
+      <CameraDirector buildings={buildings} boundsMap={boundsMap} selectedBuildingId={selectedBuildingId} preset={preset} controlsRef={controls} focusTick={focusTick} cinematic={publicMode}/>
     </Canvas>
 
-    {hoverInfo&&<div className="model-tooltip" style={{left:Math.min(window.innerWidth-220,hoverInfo.clientX+16),top:Math.min(window.innerHeight-80,hoverInfo.clientY+16)}}>
-      <strong>{hoverInfo.building.name}</strong><span>{hoverInfo.floor?hoverInfo.floor.name:'Selectează clădirea'}</span>{hoverInfo.floor&&<small>Click pentru planul etajului</small>}
+    {hoverInfo&&<div className="model-tooltip" style={{left:Math.min(window.innerWidth-235,hoverInfo.clientX+16),top:Math.min(window.innerHeight-90,hoverInfo.clientY+16)}}>
+      <strong>{hoverInfo.building.name}</strong>
+      {hoverInfo.stage==='building'
+        ? <><span>Clădire</span><small>Click pentru prim-plan și etaje</small></>
+        : <><span>{hoverInfo.floor?hoverInfo.floor.name:'Alege un etaj'}</span>{hoverInfo.floor&&<small>Click pentru planul etajului</small>}</>
+      }
     </div>}
 
     {!compact&&!publicMode&&<>

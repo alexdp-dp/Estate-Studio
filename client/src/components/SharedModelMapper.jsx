@@ -65,13 +65,21 @@ function MappingScene({url,cfg,building,pickedMode,onPick,onFootprintPoint,footP
   function objectPick(e){
     if(pickedMode==='footprint')return;
     e.stopPropagation();
-    const path=[];
-    let o=e.object;
+
+    // Nu mapăm mesh-ul individual. Plecăm direct de la părintele lui,
+    // pentru ca atribuirea să includă întregul grup/clădire cu toți descendenții.
+    const parents=[];
+    let o=e.object?.parent;
+
     while(o&&o!==clone){
-      if(o.name&&!path.includes(o.name))path.push(o.name);
+      if(o.name&&!parents.includes(o.name))parents.push(o.name);
       o=o.parent;
     }
-    onPick?.(path);
+
+    // Părintele cel mai apropiat apare primul. Dacă GLB-ul are mai multe
+    // niveluri de grupare, utilizatorul poate alege doar dintre grupuri,
+    // niciodată mesh-ul individual.
+    onPick?.(parents);
   }
 
   return <>
@@ -148,7 +156,7 @@ export default function SharedModelMapper({project,reload}){
   return <div className="shared-mapper">
     <div className="mapper-sidebar">
       <h3>Mapare clădiri</h3>
-      <p className="hint">GLB-ul rămâne o singură scenă. Atribuie noduri/mesh-uri către blocuri; pentru un GLB monolitic definește o zonă X/Z.</p>
+      <p className="hint">GLB-ul rămâne o singură scenă. Atribuie grupul/părintele întregii clădiri către bloc; toate mesh-urile descendente intră automat în același bloc. Pentru un GLB monolitic definește o zonă X/Z.</p>
       <label>Bloc<select value={building?.id||''} onChange={e=>setBid(e.target.value)}>{project.buildings.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
       <div className="segmented mapper-mode">
         <button className={mode==='nodes'?'active':''} onClick={()=>setMode('nodes')}>Noduri GLB</button>
@@ -156,9 +164,18 @@ export default function SharedModelMapper({project,reload}){
       </div>
 
       {mode==='nodes'&&<>
-        <div className="mapper-instruction">Click pe geometrie, apoi alege nivelul potrivit din ierarhia GLB.</div>
-        {pickedPath.length>0&&<div className="picked-path">{pickedPath.map((n,i)=><button key={n+i} onClick={()=>assignNode(n)}><b>{n}</b><small>{i===0?'mesh selectat':'părinte'}</small></button>)}</div>}
-        <div className="mapped-list"><b>Noduri atribuite</b>{(mapping.node_names||[]).map(n=><div key={n}><span>{n}</span><button onClick={()=>removeNode(n)}>×</button></div>)}{!(mapping.node_names||[]).length&&<small>Nimic atribuit încă.</small>}</div>
+        <div className="mapper-instruction">
+          Click pe orice parte a blocului. Estate Studio ignoră mesh-ul individual și îți arată doar părinții/grupurile din GLB. Când atribui părintele, tot blocul — pereți, geamuri, balcoane, acoperiș etc. — devine aceeași clădire.
+        </div>
+        {pickedPath.length>0
+          ? <div className="picked-path">
+              {pickedPath.map((n,i)=><button key={n+i} onClick={()=>assignNode(n)}>
+                <b>{n}</b>
+                <small>{i===0?'părinte direct':'grup părinte'}</small>
+              </button>)}
+            </div>
+          : <div className="mapper-empty-selection">Click pe un bloc pentru a-i selecta părintele.</div>}
+        <div className="mapped-list"><b>Grupuri / clădiri atribuite</b>{(mapping.node_names||[]).map(n=><div key={n}><span>{n}</span><button onClick={()=>removeNode(n)}>×</button></div>)}{!(mapping.node_names||[]).length&&<small>Nimic atribuit încă.</small>}</div>
       </>}
 
       {mode==='footprint'&&<div className="mapper-instruction">

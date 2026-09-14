@@ -421,6 +421,22 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
 
   const existing=floor?.apartments||[];
 
+  useEffect(()=>{
+    if(!guided || raw || !floor?.plan_path)return;
+    let cancelled=false;
+    (async()=>{
+      try{
+        const loaded=await loadPlan(floor.plan_path);
+        if(cancelled)return;
+        setRaw(loaded);
+        setAspect(loaded.w/Math.max(1,loaded.h));
+      }catch(e){
+        if(!cancelled)setMessage(`Nu pot încărca planul pentru modul asistat: ${e.message}`);
+      }
+    })();
+    return()=>{cancelled=true};
+  },[guided,raw,floor?.plan_path]);
+
   async function run(){
     if(!floor?.plan_path)return;
     setBusy(true);setMessage('');
@@ -463,7 +479,12 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     const r=e.currentTarget.getBoundingClientRect();
     const x=clamp((e.clientX-r.left)/r.width,0,1);
     const y=clamp((e.clientY-r.top)/r.height,0,1);
-    setSeeds(v=>[...v,{x,y}]);
+
+    setSeeds(v=>{
+      const hit=v.findIndex(p=>Math.hypot(p.x-x,p.y-y)<.035);
+      if(hit>=0)return v.filter((_,i)=>i!==hit);
+      return [...v,{x,y}];
+    });
     setResult(null);
   }
 
@@ -517,15 +538,54 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
           <small>{threshold}</small>
         </label>}
         <label className="detector-check">
-          <input type="checkbox" checked={guided} onChange={e=>{setGuided(e.target.checked);setSeeds([]);setResult(null)}}/>
+          <input type="checkbox" checked={guided} onChange={e=>{
+            const next=e.target.checked;
+            setGuided(next);
+            setSeeds([]);
+            setResult(null);
+            setExcluded(new Set());
+            setMessage('');
+          }}/>
           Mod asistat
         </label>
-        <button className="primary" disabled={busy||(guided&&!seeds.length)} onClick={run}>{busy?'Analizez…':guided?`Generează din ${seeds.length} puncte`:'Analizează planul'}</button>
+        {!guided&&<button className="primary" disabled={busy} onClick={run}>{busy?'Analizez…':'Analizează planul'}</button>}
       </div>
 
-      {guided&&<div className="guided-help"><b>Mod asistat:</b> click o singură dată în interiorul fiecărui apartament. Nu trasezi nimic; punctele doar spun detectorului ce regiuni sunt apartamente. <button onClick={()=>{setSeeds([]);setResult(null)}}>Șterge punctele</button></div>}
+      {guided&&<div className="guided-help">
+        <b>Mod asistat:</b> planul apare imediat mai jos. Click o dată în fiecare apartament. Click din nou lângă un punct ca să-l ștergi.
+        <button onClick={()=>{setSeeds([]);setResult(null)}}>Șterge punctele</button>
+      </div>}
 
-      {!result&&<div className="detector-intro">
+      {guided&&!result&&<div className="guided-stage">
+        <div className="guided-stage-head">
+          <div>
+            <b>1. Marchează apartamentele</b>
+            <span>Dă câte un click aproximativ în centrul fiecărui apartament. Nu trebuie să nimerești perfect și nu trebuie să trasezi conturul.</span>
+          </div>
+          <strong>{seeds.length} puncte</strong>
+        </div>
+        <div className="detector-preview guided" style={{aspectRatio:aspect||1}} onClick={addSeed}>
+          <img
+            src={floor.plan_path}
+            alt={`Plan ${floor.name}`}
+            onLoad={e=>setAspect(e.currentTarget.naturalWidth/Math.max(1,e.currentTarget.naturalHeight))}
+          />
+          <svg viewBox="0 0 1000 1000" preserveAspectRatio="none">
+            {seeds.map((p,i)=><g key={'seedpre'+i}>
+              <circle cx={p.x*1000} cy={p.y*1000} r="11" className="seed-dot"/>
+              <text x={p.x*1000+16} y={p.y*1000-16} className="seed-label">{i+1}</text>
+            </g>)}
+          </svg>
+        </div>
+        <div className="guided-stage-actions">
+          <small>După ce ai câte un punct în fiecare apartament, apasă „Generează din {seeds.length} puncte”.</small>
+          <button disabled={!seeds.length||busy} className="primary" onClick={run}>
+            {busy?'Analizez…':`Generează din ${seeds.length} puncte`}
+          </button>
+        </div>
+      </div>}
+
+      {!result&&!guided&&<div className="detector-intro">
         <b>Ce face detectorul</b>
         <span>• pereții negri/gri groși devin bariere;</span>
         <span>• golurile transparente interioare sunt tratate ca zonă comună/scară;</span>

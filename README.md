@@ -1,3 +1,125 @@
+# Estate Studio — Build 03.7.7 Two-Stage Selection
+
+Viewer public refăcut pe interacțiunea cerută:
+
+## Stage 1 — Ansamblu
+- în vederea inițială se poate selecta DOAR blocul;
+- hover-ul este la nivel de bloc complet;
+- etajele NU sunt detectate / selectabile în această etapă;
+- tooltip: `Bloc X · Clădire · Click pentru prim-plan și etaje`;
+- click pe bloc, bulină sau butonul din listă:
+  - selectează doar blocul;
+  - forțează perspectiva;
+  - pornește mișcarea cinematografică;
+  - încadrează blocul în prim-plan.
+
+## Stage 2 — Bloc selectat
+- doar după ce blocul este activ, hover-ul 3D trece la nivel de etaj;
+- click pe etaj deschide planul;
+- panoul de etaje apare pentru blocul selectat;
+- selectarea altui bloc revine automat la Stage 1 pentru noul bloc și face un nou fly cinematic.
+
+Include cumulativ toate funcțiile și fixurile din 03.7.6.
+
+`/api/version` => `03.7.7-two-stage-selection`
+
+# Estate Studio — Build 03.7.6 Cinematic Building Focus
+
+Viewer public `/embed/:slug`:
+- selectarea unui bloc din listă sau din bulină pornește o mișcare cinematografică;
+- camera nu mai face un simplu lerp/zoom drept;
+- traseul folosește o curbă cubic Bézier cu mică mișcare laterală + lift;
+- ținta camerei este mutată ușor deasupra centrului clădirii pentru framing mai natural;
+- pentru un complex, camera încearcă să vină spre bloc dinspre exteriorul ansamblului, ca să evite traversarea altor clădiri;
+- finalul este un prim-plan mai strâns, cu FOV redus la ~32.5°;
+- revenirea la `Toate clădirile` face o tranziție fluidă înapoi la ansamblu;
+- controalele Orbit sunt blocate doar pe durata animației și revin automat după;
+- presetările `De sus` / `Față` rămân disponibile și folosesc tranziție fluidă.
+
+Include cumulativ toate funcțiile și fixurile din 03.7.5.
+
+`/api/version` => `03.7.6-cinematic-building-focus`
+
+# Estate Studio — Build 03.7.5 Bubble Position Fix
+
+Fix pentru bulinele/numele blocurilor din viewerul public:
+
+- bulina NU mai este poziționată după originea/pivot-ul GLB;
+- bulina NU mai folosește poziția estimată sau label-ul salvat în mapper;
+- poziția este calculată exclusiv din bounding box-ul REAL al geometriei randate, în coordonate world-space;
+- funcționează identic pentru:
+  - un GLB separat per bloc;
+  - un GLB comun cu mai multe blocuri;
+  - blocuri cu pivot/origine deplasată în fișier;
+  - blocuri rotite / scalate;
+- bulina este centrată X/Z pe geometria blocului și stă puțin peste `maxY`;
+- s-a adăugat un mic stem vizual sub bulină ca asocierea cu clădirea să fie clară.
+
+Include cumulativ toate funcțiile/fixurile din 03.7.4.
+
+`/api/version` => `03.7.5-bubble-position-fix`
+
+# Estate Studio — Build 03.7.4 Guided Mode Fix
+
+Fix pentru modul asistat al detectorului:
+
+- când activezi `Mod asistat`, planul apare IMEDIAT, înainte de analiză;
+- dai un click în interiorul fiecărui apartament;
+- fiecare click apare numerotat peste plan;
+- click din nou lângă un punct îl șterge;
+- `Șterge punctele` golește selecția;
+- după ce ai toate apartamentele marcate, apeși `Generează din N puncte`;
+- abia atunci detectorul urmărește pereții și construiește poligoanele;
+- nu trebuie să trasezi manual contururile.
+
+Include cumulativ 03.7.3:
+- parent-group mapping pentru GLB comun;
+- fix camera / bounding box real;
+- tooltip apartamente;
+- shared-complex UI;
+- auto apartment detection.
+
+`/api/version` => `03.7.4-guided-mode-fix`
+
+# Estate Studio — Build 03.7.3 Parent Group Mapping
+
+Modificare la maparea unui GLB comun cu mai multe clădiri:
+
+- mesh-ul individual NU mai apare ca opțiune de mapare;
+- click pe orice mesh pornește selecția de la `mesh.parent`;
+- utilizatorul poate atribui doar părinți / grupuri GLB;
+- atribuirea unui părinte include automat toate mesh-urile descendente ale grupului;
+- viewerul existent folosește deja ancestry-ul nodurilor, deci pereți, geamuri, balcoane, acoperiș etc. sunt tratate împreună ca aceeași clădire;
+- fallback-ul `Zonă X/Z` pentru GLB monolitic rămâne neschimbat;
+- include toate fixurile din 03.7.2 (camera real bounds + tooltip apartamente).
+
+`/api/version` => `03.7.3-parent-group-mapping`
+
+# Estate Studio — Build 03.7.2
+
+Hotfix critic peste 03.7.1:
+
+- repară dispariția modelului din preview/embed;
+- camera NU mai presupune că GLB-ul este centrat la originea blocului;
+- camera folosește bounding box-ul REAL al geometriei după scalare, rotație și poziționare;
+- bulina blocului se așază deasupra geometriei reale, nu deasupra originii GLB;
+- pentru GLB comun, viewerul calculează și bounds reale pentru scenă / nodurile mapate;
+- Reset camera funcționează din nou;
+- pe planul apartamentelor apare tooltip la hover cu:
+  - cod;
+  - denumire;
+  - disponibilitate;
+  - camere;
+  - suprafață utilă;
+  - suprafață totală;
+  - preț + monedă;
+  - descriere scurtă, dacă există.
+- click pe poligon deschide în continuare cardul complet.
+
+Cauza regresiei: Build 03.7 calcula focusul camerei din `building.position_x/z`, dar GLB-urile pot avea geometria internă deplasată față de origine. Proiectul `test` are exact acest caz.
+
+`/api/version` => `03.7.2-viewer-fix-tooltips`
+
 # Estate Studio — Build 03.7.1
 
 Include Shared Complex / Macheta UI din 03.7 și repară detectorul de apartamente.

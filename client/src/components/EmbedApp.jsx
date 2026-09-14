@@ -9,10 +9,48 @@ function polygonPoints(apartment){
   return rel?.points||[];
 }
 function FloorOverlay({floor,onClose,onApartment}){
+  const [hover,setHover]=useState(null);
+
+  function priceText(a){
+    if(a.price===null||a.price===undefined||a.price==='')return null;
+    const n=Number(a.price);
+    return `${Number.isFinite(n)?n.toLocaleString('ro-RO'):a.price} ${a.currency||'EUR'}`;
+  }
+
+  function hoverApartment(a,e){
+    setHover({a,x:e.clientX,y:e.clientY});
+  }
+
   return <div className="embed-overlay"><div className="floor-sheet"><button className="sheet-close" onClick={onClose}>×</button>
     <div className="sheet-head"><div><span>PLAN ETAJ</span><h2>{floor.name}</h2></div><div className="legend"><i className="available"/>Disponibil <i className="reserved"/>Rezervat <i className="sold"/>Vândut</div></div>
-    <div className="plan-public">{floor.plan_path?<div className="plan-image-wrap"><img src={floor.plan_path}/><svg viewBox="0 0 100 100" preserveAspectRatio="none">{(floor.apartments||[]).map(a=>{const ps=polygonPoints(a);return ps.length>2?<polygon key={a.id} className={a.status} points={ps.map(p=>`${p.x*100},${p.y*100}`).join(' ')} onClick={()=>onApartment(a)}><title>{a.code} · {statusLabel[a.status]}</title></polygon>:null})}</svg></div>:<div className="plan-missing">Planul etajului nu este încărcat.</div>}</div>
-    <div className="apartments-strip">{(floor.apartments||[]).map(a=><button key={a.id} onClick={()=>onApartment(a)}><b>{a.code}</b><span>{a.rooms?`${a.rooms} camere · `:''}{a.usable_area_sqm?`${a.usable_area_sqm} m² · `:''}{statusLabel[a.status]}</span></button>)}</div>
+    <div className="plan-public">{floor.plan_path?<div className="plan-image-wrap"><img src={floor.plan_path}/><svg viewBox="0 0 100 100" preserveAspectRatio="none">
+      {(floor.apartments||[]).map(a=>{
+        const ps=polygonPoints(a);
+        if(ps.length<=2)return null;
+        return <polygon
+          key={a.id}
+          className={`${a.status}${hover?.a?.id===a.id?' hovered':''}`}
+          points={ps.map(p=>`${p.x*100},${p.y*100}`).join(' ')}
+          onMouseEnter={e=>hoverApartment(a,e)}
+          onMouseMove={e=>hoverApartment(a,e)}
+          onMouseLeave={()=>setHover(null)}
+          onClick={()=>onApartment(a)}
+        />
+      })}
+    </svg></div>:<div className="plan-missing">Planul etajului nu este încărcat.</div>}</div>
+    <div className="apartments-strip">{(floor.apartments||[]).map(a=><button key={a.id} onMouseEnter={e=>hoverApartment(a,e)} onMouseMove={e=>hoverApartment(a,e)} onMouseLeave={()=>setHover(null)} onClick={()=>onApartment(a)}><b>{a.code}</b><span>{a.rooms?`${a.rooms} camere · `:''}{a.usable_area_sqm?`${a.usable_area_sqm} m² · `:''}{statusLabel[a.status]}</span></button>)}</div>
+
+    {hover&&<div className="apartment-hover-tooltip" style={{left:Math.min(window.innerWidth-285,hover.x+15),top:Math.min(window.innerHeight-205,hover.y+15)}}>
+      <div className="apt-tip-head"><div><small>{hover.a.code}</small><b>{hover.a.title||'Apartament'}</b></div><span className={'status-pill '+hover.a.status}>{statusLabel[hover.a.status]}</span></div>
+      <div className="apt-tip-grid">
+        {hover.a.rooms&&<div><span>Camere</span><b>{hover.a.rooms}</b></div>}
+        {hover.a.usable_area_sqm&&<div><span>Suprafață utilă</span><b>{hover.a.usable_area_sqm} m²</b></div>}
+        {hover.a.total_area_sqm&&<div><span>Suprafață totală</span><b>{hover.a.total_area_sqm} m²</b></div>}
+        {priceText(hover.a)&&<div><span>Preț</span><b>{priceText(hover.a)}</b></div>}
+      </div>
+      {hover.a.description&&<p>{hover.a.description.length>120?hover.a.description.slice(0,117)+'…':hover.a.description}</p>}
+      <small className="apt-tip-click">Click pentru detalii</small>
+    </div>}
   </div></div>
 }
 function ApartmentCard({a,onClose}){
@@ -37,7 +75,20 @@ export default function EmbedApp(){
   if(!project)return <div className="embed-loading">ESTATE STUDIO</div>;
 
   function selectBuilding(b){
-    setBuildingId(b?.id||null);setActiveFloor(null);setFloor(null);
+    setActiveFloor(null);
+    setFloor(null);
+
+    if(b){
+      // Every building selection starts from a perspective hero shot.
+      // Floors become interactive only after this building is the active selection.
+      setView('perspective');
+      viewer?.setPreset?.('perspective');
+      setBuildingId(b.id);
+    }else{
+      setBuildingId(null);
+      setView('perspective');
+      viewer?.setPreset?.('perspective');
+    }
   }
   function setPreset(p){setView(p);viewer?.setPreset?.(p)}
   function toggleRotate(){const next=!autoRotate;setAutoRotate(next);viewer?.setAutoRotate?.(next)}
@@ -71,7 +122,7 @@ export default function EmbedApp(){
     </aside>
 
     {building&&<aside className="macheta-floors">
-      <div><small>{building.name}</small><b>Selectează etajul</b></div>
+      <div><small>{building.name} · PRIM-PLAN</small><b>Selectează etajul</b></div>
       <div>{[...(building.floors||[])].reverse().map(f=><button key={f.id} onMouseEnter={()=>setActiveFloor(f)} onMouseLeave={()=>!floor&&setActiveFloor(null)} onClick={()=>{setActiveFloor(f);setFloor(f)}}><span>{f.name}</span><small>{f.apartments?.filter(a=>a.status==='available').length||0} disponibile</small></button>)}</div>
     </aside>}
 
@@ -88,7 +139,10 @@ export default function EmbedApp(){
     </div>
 
     <div className="macheta-north"><b>N</b><span>↑</span></div>
-    <div className="macheta-hint"><span>↖</span> Trage pentru rotire <i/> Scroll pentru zoom <i/> Click pe bulină pentru bloc</div>
+    <div className="macheta-hint">
+      <span>↖</span> Trage pentru rotire <i/> Scroll pentru zoom <i/>
+      {building?'Hover + click pe etaj':'Hover + click pentru a selecta blocul'}
+    </div>
 
     {floor&&<FloorOverlay floor={floor} onClose={()=>{setFloor(null);setActiveFloor(null)}} onApartment={setApartment}/>}
     {apartment&&<ApartmentCard a={apartment} onClose={()=>setApartment(null)}/>}
