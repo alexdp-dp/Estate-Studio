@@ -1,3 +1,51 @@
+# Estate Studio — Build 03.7.1
+
+Include Shared Complex / Macheta UI din 03.7 și repară detectorul de apartamente.
+
+Detector nou:
+- sensibilitate automată: testează mai multe praguri de perete;
+- elimină din candidați benzile foarte înguste (balcoane/terase/shafts);
+- overlay-ul are exact proporția imaginii — nu mai presupune plan pătrat;
+- `Mod asistat`: dacă Auto nu e suficient, dai un click în fiecare apartament, fără trasare manuală; detectorul folosește pereții și mută limitele spre mijlocul lor;
+- sensibilitate manuală rămâne fallback;
+- pe planul de test FIZICIENILOR algoritmul de regiuni separă clusterul principal în 9 zone de apartament și exclude benzile înguste de terasă înainte de confirmare.
+
+`/api/version` => `03.7.1-shared-complex-detector-fix`
+
+# Estate Studio — Build 03.7 Shared Complex + Macheta UI
+
+Upgrade backward-compatible peste Build 03.6.
+
+## Model 3D
+Două moduri:
+1. `GLB separat per bloc` — fluxul existent, neschimbat.
+2. `GLB comun · complex` — un singur GLB pentru tot ansamblul.
+
+În modul comun:
+- GLB-ul este încărcat o singură dată;
+- clădirile Estate Studio rămân entități independente;
+- maparea poate fi după noduri/mesh-uri GLB;
+- pentru un GLB monolitic poți defini o zonă spațială X/Z pentru fiecare bloc;
+- pozițiile relative ale blocurilor din GLB nu sunt modificate;
+- maparea este salvată în `buildings.settings.shared_mapping`;
+- configurația modelului comun este salvată în `projects.settings.shared_model`;
+- NU sunt necesare modificări de schemă Supabase.
+
+## Viewer public `/embed/:slug`
+- pornește cu întregul ansamblu;
+- bulină permanentă deasupra fiecărui bloc;
+- click pe bulină selectează blocul;
+- buton `Toate clădirile`;
+- buton separat pentru fiecare bloc;
+- camera face fly/zoom animat către bloc;
+- Perspectivă / De sus / Auto rotate;
+- zoom + / - / reset;
+- fără grid / wireframe pe sol;
+- hover pe bloc + tooltip bloc/etaj;
+- după selectarea blocului apar etajele;
+- planurile/apartamentele existente rămân neschimbate.
+
+`/api/version` => `03.7-shared-complex-ui`
 # Estate Studio — Build 03.6 Auto Apartments
 
 Upgrade backward-compatible peste 03.5:

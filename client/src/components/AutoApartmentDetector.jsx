@@ -76,25 +76,31 @@ function components(mask,w,h,eight=true){
   return {labels,stats};
 }
 
+function candidatePool(stats,opaqueCount){
+  const minArea=Math.max(60,opaqueCount*.0018);
+  return stats
+    .filter(s=>{
+      if(s.area<minArea)return false;
+      const aspect=Math.min(s.width,s.height)/Math.max(s.width,s.height);
+      // Eliminate long balcony/terrace bands and thin shafts from automatic apartment candidates.
+      if(aspect<.30 && s.area<opaqueCount*.04)return false;
+      return true;
+    })
+    .sort((a,b)=>b.area-a.area)
+    .slice(0,40);
+}
 function suggestedCount(stats,opaqueCount,expected){
-  const usable=stats.filter(s=>s.area>=Math.max(60,opaqueCount*.0018)).sort((a,b)=>b.area-a.area).slice(0,30);
+  const usable=candidatePool(stats,opaqueCount);
   if(!usable.length)return {count:0,usable};
   if(Number(expected)>0)return {count:Math.min(Number(expected),usable.length),usable};
 
-  let bestIndex=-1,bestDrop=.38;
-  const maxCheck=Math.min(20,usable.length-1);
-  for(let i=3;i<maxCheck;i++){
-    const ratio=usable[i+1].area/usable[i].area;
-    const drop=1-ratio;
-    if(drop>bestDrop && usable[i].area>=opaqueCount*.004){
-      bestDrop=drop;bestIndex=i;
-    }
-  }
-  let count=bestIndex>=0?bestIndex+1:usable.filter(s=>s.area>=usable[0].area*.28).length;
+  // Apartments on a floor tend to form a clear area cluster. Small room fragments,
+  // shafts and balconies fall well below that cluster.
+  const cutoff=usable[0].area*.28;
+  let count=usable.filter(s=>s.area>=cutoff).length;
   count=clamp(count,1,Math.min(30,usable.length));
   return {count,usable};
 }
-
 function key(x,y){return `${x},${y}`}
 function polygonArea(points){
   let a=0;
@@ -214,7 +220,7 @@ function contourForLabel(labelMap,target,w,h){
   return simplified.map(([x,y])=>({x:clamp(x/w,0,1),y:clamp(y/h,0,1)}));
 }
 
-function analyzePixels(imageData,w,h,threshold,expected,excludedIds=new Set()){
+function analyzePixels(imageData,w,h,threshold,expected,excludedIds=new Set(),seedPoints=[]){
   const d=imageData.data,N=w*h;
   const opaque=new Uint8Array(N),dark=new Uint8Array(N);
   let opaqueCount=0;
@@ -237,7 +243,32 @@ function analyzePixels(imageData,w,h,threshold,expected,excludedIds=new Set()){
   for(let i=0;i<N;i++)free[i]=opaque[i]&&!wall[i]?1:0;
   const cc=components(free,w,h,true);
   const {count,usable}=suggestedCount(cc.stats,opaqueCount,expected);
-  const initial=usable.slice(0,count);
+
+  let initial;
+  if(seedPoints?.length){
+    const ids=[];
+    for(const p of seedPoints){
+      const x=clamp(Math.round(p.x*(w-1)),0,w-1);
+      const y=clamp(Math.round(p.y*(h-1)),0,h-1);
+      let id=cc.labels[y*w+x];
+      // If the click landed exactly on a wall, look nearby for the closest free-space component.
+      if(!id){
+        outer: for(let r=1;r<=8;r++){
+          for(let yy=Math.max(0,y-r);yy<=Math.min(h-1,y+r);yy++){
+            for(let xx=Math.max(0,x-r);xx<=Math.min(w-1,x+r);xx++){
+              const test=cc.labels[yy*w+xx];
+              if(test){id=test;break outer}
+            }
+          }
+        }
+      }
+      if(id&&!ids.includes(id))ids.push(id);
+    }
+    initial=ids.map(id=>cc.stats.find(x=>x.id===id)).filter(Boolean);
+  }else{
+    initial=usable.slice(0,count);
+  }
+
   const chosen=initial.filter(c=>!excludedIds.has(c.id));
 
   // Transparent holes fully enclosed by the drawing are strong common-core/stair candidates.
@@ -324,6 +355,37 @@ function analyzePixels(imageData,w,h,threshold,expected,excludedIds=new Set()){
   };
 }
 
+
+function analysisScore(result,expected){
+  const n=result.detections.length;
+  if(!n)return -1e9;
+  if(Number(expected)>0)return -Math.abs(n-Number(expected))*100 + n;
+  // Prefer plausible residential-floor counts and a stable set of sizeable regions.
+  const plausible=n>=2&&n<=30 ? 80 : -80;
+  const confid=result.detections.reduce((a,b)=>a+b.confidence,0)/n;
+  return plausible+n*2+confid*20;
+}
+function analyzeAuto(imageData,w,h,expected,excludedIds=new Set(),seedPoints=[]){
+  if(seedPoints?.length){
+    // Guided mode needs only a reasonable wall threshold; test a few and keep the one
+    // that resolves the most unique clicked units.
+    let best=null,bestScore=-1e9;
+    for(const t of [85,90,95,100,105,110,115]){
+      const r=analyzePixels(imageData,w,h,t,seedPoints.length,excludedIds,seedPoints);
+      const score=(r.detections.length===seedPoints.length?1000:0)+r.detections.length*20;
+      if(score>bestScore){best=r;bestScore=score}
+    }
+    return best;
+  }
+  let best=null,bestScore=-1e9;
+  for(let t=80;t<=125;t+=5){
+    const r=analyzePixels(imageData,w,h,t,expected,excludedIds,[]);
+    const score=analysisScore(r,expected);
+    if(score>bestScore){best=r;bestScore=score}
+  }
+  return best;
+}
+
 async function loadPlan(url,maxDim=520){
   const r=await fetch(url,{mode:'cors'});
   if(!r.ok)throw new Error(`Nu pot încărca planul (${r.status}).`);
@@ -344,7 +406,11 @@ const colors=[
 
 export default function AutoApartmentDetector({floor,onClose,onCommitted}){
   const [expected,setExpected]=useState('');
-  const [threshold,setThreshold]=useState(90);
+  const [threshold,setThreshold]=useState(95);
+  const [autoThreshold,setAutoThreshold]=useState(true);
+  const [guided,setGuided]=useState(false);
+  const [seeds,setSeeds]=useState([]);
+  const [aspect,setAspect]=useState(1);
   const [busy,setBusy]=useState(false);
   const [raw,setRaw]=useState(null);
   const [result,setResult]=useState(null);
@@ -361,9 +427,12 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     try{
       const loaded=raw||await loadPlan(floor.plan_path);
       if(!raw)setRaw(loaded);
-      const r=analyzePixels(loaded.imageData,loaded.w,loaded.h,Number(threshold)||90,expected,new Set());
+      const r=autoThreshold
+        ? analyzeAuto(loaded.imageData,loaded.w,loaded.h,expected,new Set(),guided?seeds:[])
+        : analyzePixels(loaded.imageData,loaded.w,loaded.h,Number(threshold)||95,expected,new Set(),guided?seeds:[]);
       setExcluded(new Set());
       setResult(r);
+      if(r?.threshold)setThreshold(r.threshold);
       const m={};
       r.detections.forEach((d,i)=>{m[i]=existing[i]?.id||'new'});
       setMapping(m);
@@ -374,7 +443,9 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
 
   function recompute(nextExcluded){
     if(!raw)return;
-    const r=analyzePixels(raw.imageData,raw.w,raw.h,Number(threshold)||90,expected,nextExcluded);
+    const r=autoThreshold
+      ? analyzeAuto(raw.imageData,raw.w,raw.h,expected,nextExcluded,guided?seeds:[])
+      : analyzePixels(raw.imageData,raw.w,raw.h,Number(threshold)||95,expected,nextExcluded,guided?seeds:[]);
     setExcluded(nextExcluded);setResult(r);
     const m={};
     r.detections.forEach((d,i)=>{m[i]=existing[i]?.id||'new'});
@@ -385,6 +456,15 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     const next=new Set(excluded);
     if(next.has(componentId))next.delete(componentId);else next.add(componentId);
     recompute(next);
+  }
+
+  function addSeed(e){
+    if(!guided)return;
+    const r=e.currentTarget.getBoundingClientRect();
+    const x=clamp((e.clientX-r.left)/r.width,0,1);
+    const y=clamp((e.clientY-r.top)/r.height,0,1);
+    setSeeds(v=>[...v,{x,y}]);
+    setResult(null);
   }
 
   async function commit(){
@@ -424,22 +504,34 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         <div><small>AUTO-DETECT · BETA</small><h2>Detectează apartamentele</h2><p>Detectorul caută pereții groși întunecați, separă zonele locuibile și mută limitele comune spre axa mediană a pereților.</p></div>
       </div>
 
-      <div className="detector-settings">
+      <div className="detector-settings detector-settings-v2">
         <label>Număr apartamente estimat
           <input type="number" min="1" max="50" placeholder="Auto" value={expected} onChange={e=>setExpected(e.target.value)}/>
         </label>
-        <label>Sensibilitate pereți
-          <input type="range" min="65" max="125" value={threshold} onChange={e=>setThreshold(e.target.value)}/>
-          <small>{threshold}</small>
+        <label className="detector-check">
+          <input type="checkbox" checked={autoThreshold} onChange={e=>setAutoThreshold(e.target.checked)}/>
+          Sensibilitate automată
         </label>
-        <button className="primary" disabled={busy} onClick={run}>{busy?'Analizez…':'Analizează planul'}</button>
+        {!autoThreshold&&<label>Sensibilitate pereți
+          <input type="range" min="65" max="130" value={threshold} onChange={e=>setThreshold(e.target.value)}/>
+          <small>{threshold}</small>
+        </label>}
+        <label className="detector-check">
+          <input type="checkbox" checked={guided} onChange={e=>{setGuided(e.target.checked);setSeeds([]);setResult(null)}}/>
+          Mod asistat
+        </label>
+        <button className="primary" disabled={busy||(guided&&!seeds.length)} onClick={run}>{busy?'Analizez…':guided?`Generează din ${seeds.length} puncte`:'Analizează planul'}</button>
       </div>
+
+      {guided&&<div className="guided-help"><b>Mod asistat:</b> click o singură dată în interiorul fiecărui apartament. Nu trasezi nimic; punctele doar spun detectorului ce regiuni sunt apartamente. <button onClick={()=>{setSeeds([]);setResult(null)}}>Șterge punctele</button></div>}
 
       {!result&&<div className="detector-intro">
         <b>Ce face detectorul</b>
         <span>• pereții negri/gri groși devin bariere;</span>
         <span>• golurile transparente interioare sunt tratate ca zonă comună/scară;</span>
         <span>• apartamentele concurează pentru jumătatea pereților comuni;</span>
+        <span>• elimină automat zonele foarte înguste (benzi de terasă/balcon) din lista de apartamente;</span>
+        <span>• dacă Auto nu separă bine planul, activezi „Mod asistat” și dai câte un click în fiecare apartament;</span>
         <span>• nimic nu se salvează până nu confirmi propunerile.</span>
       </div>}
 
@@ -447,11 +539,12 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         <div className="detector-summary">
           <b>{result.detections.length} apartamente propuse</b>
           <span>{coreText}</span>
+          <small>Prag pereți folosit: {result.threshold}{guided?` · ${seeds.length} puncte-ghid`:''}</small>
           <small>Poți marca o propunere drept „zonă comună” și detectorul recalculează limitele.</small>
         </div>
 
-        <div className="detector-preview">
-          <img src={floor.plan_path} alt={`Plan ${floor.name}`}/>
+        <div className={'detector-preview '+(guided?'guided':'')} style={{aspectRatio:aspect||1}} onClick={addSeed}>
+          <img src={floor.plan_path} alt={`Plan ${floor.name}`} onLoad={e=>setAspect(e.currentTarget.naturalWidth/Math.max(1,e.currentTarget.naturalHeight))}/>
           <svg viewBox="0 0 1000 1000" preserveAspectRatio="none">
             {result.likelyCore?.points?.length>3&&<polygon
               className="common-core"
@@ -462,6 +555,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
               points={d.points.map(p=>`${p.x*1000},${p.y*1000}`).join(' ')}
               style={{fill:colors[i%colors.length]+'66',stroke:colors[i%colors.length]}}
             />)}
+            {seeds.map((p,i)=><g key={'seed'+i}><circle cx={p.x*1000} cy={p.y*1000} r="10" className="seed-dot"/><text x={p.x*1000+14} y={p.y*1000-14} className="seed-label">{i+1}</text></g>)}
           </svg>
         </div>
 
