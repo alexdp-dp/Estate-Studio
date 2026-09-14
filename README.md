@@ -1,3 +1,49 @@
+# Estate Studio — Build 03.8.4 Detector Runtime Rollback
+
+HOTFIX pentru crash-ul detectorului de apartamente.
+
+## Ce am făcut
+- am păstrat TOT buildul 03.8.3:
+  - camera 03.7.16;
+  - viewerul;
+  - selecția bloc → etaj;
+  - shade disabled;
+  - editorul de poligoane cu mutare liberă și pan stabil;
+  - toate fixurile cumulative.
+- am scos din runtime stratul OCR/Tesseract introdus în 03.8.1/03.8.2;
+- am restaurat detectorul `Architectural V2` din 03.8.0, ultima versiune înainte de ramura OCR;
+- am eliminat `tesseract.js` din `client/package.json`.
+
+Scopul acestui build este unul singur: detectorul să se deschidă și să ruleze din nou stabil.
+
+Funcția cu AP.xx este TEMPORAR scoasă din hotfix. O reintroducem separat, după ce detectorul stabil este verificat, fără să mai punem în pericol tot modulul.
+
+`/api/version` => `03.8.4-detector-runtime-rollback`
+
+# Estate Studio — Build 03.8.3 Stable Free Polygon Editor
+
+Fix concentrat pe editorul manual al poligoanelor.
+
+## Puncte
+- în modul `Editează`, vertex-urile se mișcă LIBER implicit;
+- snap-ul nu mai trage punctul unde vrea algoritmul;
+- `Snap edit` este separat și oprit implicit;
+- `Shift` poate activa temporar snap-ul când chiar îl vrei;
+- coordonata vertex-ului este calculată din pointer prin inversa transformării viewportului, nu din poziția internă temporară a Circle-ului Konva;
+- fiecare vertex este limitat strict în dreptunghiul planului.
+
+## Pan / zoom
+- în timpul drag-ului unui vertex, viewportul este blocat și nu poate începe pan accidental;
+- Stage-ul nu este mutat niciodată;
+- pan-ul are limite și nu mai poate arunca tot planul în afara ecranului;
+- zoom-ul recalculează și el o poziție validă;
+- `Încadrează planul` revine la scale 1 / poziția 0,0;
+- CSS-ul canvasului blochează scroll/touch gestures care puteau interfera cu Konva.
+
+Detectorul rămâne cel din 03.8.2; nu am amestecat încă un nou algoritm de uși/holuri în același build ca să nu introducem altă regresie.
+
+`/api/version` => `03.8.3-stable-free-polygon-editor`
+
 # Estate Studio — Build 03.8.2 Hybrid AP Optional Detector
 
 Corecție importantă de logică: etichetele `AP.xx` NU definesc numărul de apartamente.

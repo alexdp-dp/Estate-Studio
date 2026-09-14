@@ -324,3 +324,20 @@ a.primary:hover,
   stroke-width:3;
   vector-effect:non-scaling-stroke;
 }
+
+/* 03.8.3 — stable polygon editor */
+.stage-holder{
+  position:relative;
+  isolation:isolate;
+  touch-action:none;
+  user-select:none;
+  overscroll-behavior:contain;
+}
+.stage-holder canvas{
+  display:block!important;
+  touch-action:none!important;
+}
+.polygon-workspace{
+  min-width:0;
+  overflow:hidden;
+}

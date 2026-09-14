@@ -79,6 +79,7 @@ export default function PlanEditor({floor,onChanged}){
   const stageRef=useRef();
   const viewportRef=useRef();
   const panWasDragging=useRef(false);
+  const vertexDragging=useRef(false);
   const image=useHtmlImage(floor?.plan_path);
   const [size,setSize]=useState({w:900,h:600});
   const [scale,setScale]=useState(1);
@@ -91,6 +92,7 @@ export default function PlanEditor({floor,onChanged}){
   const [snapOrtho,setSnapOrtho]=useState(true);
   const [snap45,setSnap45]=useState(false);
   const [snapVertices,setSnapVertices]=useState(true);
+  const [snapEdit,setSnapEdit]=useState(false);
 
   const selected=(floor?.apartments||[]).find(a=>a.id===selectedId);
 
@@ -134,12 +136,25 @@ export default function PlanEditor({floor,onChanged}){
     const p=st?.getPointerPosition();
     if(!st || !viewport || !p) return {x:0,y:0};
 
-    // Convertim pointerul prin inversa transformării reale a viewportului Konva.
-    // Astfel coordonatele rămân exacte indiferent de zoom/pan.
+    // Always convert the CURRENT pointer through the inverse viewport transform.
+    // Never trust a dragged Circle's local x/y, because Konva can update those
+    // before React re-renders and that was the source of the "plan flies away" bug.
     const local=viewport.getAbsoluteTransform().copy().invert().point(p);
     return {
       x:clamp01((local.x-imgRect.x)/imgRect.w),
       y:clamp01((local.y-imgRect.y)/imgRect.h)
+    };
+  }
+
+  function clampPan(next,atScale=scale){
+    // Keep at least a visible strip of the canvas on screen. Pan can never throw
+    // the whole plan outside the viewport.
+    const keep=Math.min(90,Math.max(44,Math.min(size.w,size.h)*.10));
+    const scaledW=size.w*atScale;
+    const scaledH=size.h*atScale;
+    return {
+      x:Math.max(keep-scaledW,Math.min(size.w-keep,next.x)),
+      y:Math.max(keep-scaledH,Math.min(size.h-keep,next.y))
     };
   }
 
@@ -198,43 +213,99 @@ export default function PlanEditor({floor,onChanged}){
     const local={x:(pointer.x-pos.x)/old,y:(pointer.y-pos.y)/old};
     const next=Math.max(.5,Math.min(5,e.evt.deltaY>0?old/1.08:old*1.08));
 
-    setScale(next);
-    setPos({
+    const nextPos=clampPan({
       x:pointer.x-local.x*next,
       y:pointer.y-local.y*next
-    });
+    },next);
+
+    setScale(next);
+    setPos(nextPos);
   }
 
   function dragVertex(i,e){
-    const x=(e.target.x()-imgRect.x)/imgRect.w;
-    const y=(e.target.y()-imgRect.y)/imgRect.h;
-    const raw={x:clamp01(x),y:clamp01(y)};
+    e.cancelBubble=true;
+
+    const raw=pointerToNorm();
+    const forceSnap=!!e?.evt?.shiftKey;
+    const disableSnap=!!(e?.evt?.altKey || e?.evt?.metaKey);
 
     setDraft(v=>{
       const arr=[...v];
-      const prev=i>0 ? arr[i-1] : null;
-      const next=i<arr.length-1 ? arr[i+1] : null;
-      const anchor=prev || next;
-      if(!anchor) {
+
+      // Editing is FREE by default. This is intentionally different from drawing.
+      // Hold Shift (or enable "Snap edit") only when you actually want geometry snap.
+      if(!snapEdit && !forceSnap){
         arr[i]=raw;
         return arr;
       }
 
-      const force45=e?.evt?.shiftKey;
-      const disableSnap=e?.evt?.altKey || e?.evt?.metaKey;
-
       if(disableSnap){
         arr[i]=raw;
-      }else{
-        arr[i]=applySnap(raw,[anchor],{
-          snapOrtho:snapOrtho || force45,
-          snap45:snap45 || force45,
-          snapVertices:snapVertices
-        });
+        return arr;
       }
+
+      const neighbours=[];
+      if(arr.length>1){
+        neighbours.push(arr[(i-1+arr.length)%arr.length]);
+        neighbours.push(arr[(i+1)%arr.length]);
+      }
+
+      // Pick the nearest neighbour as the temporary snap anchor.
+      let anchor=neighbours[0]||null;
+      if(neighbours.length===2){
+        anchor=distance(raw,neighbours[0])<=distance(raw,neighbours[1])
+          ? neighbours[0]
+          : neighbours[1];
+      }
+
+      arr[i]=anchor
+        ? applySnap(raw,[anchor],{
+            snapOrtho:true,
+            snap45:snap45 || forceSnap,
+            snapVertices:false
+          })
+        : raw;
+
       return arr;
     });
   }
+
+  function beginVertexDrag(e){
+    vertexDragging.current=true;
+    panWasDragging.current=false;
+    e.cancelBubble=true;
+
+    // Freeze viewport transform while editing a vertex.
+    const viewport=viewportRef.current;
+    if(viewport){
+      viewport.stopDrag?.();
+      viewport.draggable(false);
+    }
+  }
+
+  function endVertexDrag(e){
+    e.cancelBubble=true;
+
+    // Re-read the final pointer once, rather than accepting a stale Konva node position.
+    const st=stageRef.current;
+    if(st && e?.evt)st.setPointersPositions(e.evt);
+
+    vertexDragging.current=false;
+
+    const viewport=viewportRef.current;
+    if(viewport)viewport.draggable(mode==='pan');
+
+    // Force the actual Konva handle back to the canonical React coordinate.
+    requestAnimationFrame(()=>{
+      const p=draft[e.target?.index];
+      if(!p)return;
+      e.target.position({
+        x:imgRect.x+p.x*imgRect.w,
+        y:imgRect.y+p.y*imgRect.h
+      });
+    });
+  }
+
 
   return (
     <div className="polygon-workspace">
@@ -249,10 +320,11 @@ export default function PlanEditor({floor,onChanged}){
           <button className={snapOrtho?'active':''} onClick={()=>setSnapOrtho(v=>!v)}>Snap 0/90°</button>
           <button className={snap45?'active':''} onClick={()=>setSnap45(v=>!v)}>45°</button>
           <button className={snapVertices?'active':''} onClick={()=>setSnapVertices(v=>!v)}>Vertices</button>
+          <button className={snapEdit?'active':''} onClick={()=>setSnapEdit(v=>!v)}>Snap edit</button>
         </div>
 
         <button onClick={()=>setDraft(v=>v.slice(0,-1))}>Undo punct</button>
-        <button onClick={()=>{setScale(1);setPos({x:0,y:0})}}>Reset zoom</button>
+        <button onClick={()=>{setScale(1);setPos({x:0,y:0})}}>Încadrează planul</button>
         <button className="primary" disabled={busy||!selected} onClick={savePolygon}>
           {busy?'Salvez…':'Salvează poligon'}
         </button>
@@ -294,14 +366,29 @@ export default function PlanEditor({floor,onChanged}){
                 y={pos.y}
                 scaleX={scale}
                 scaleY={scale}
-                draggable={mode==='pan'}
-                onDragStart={()=>{
+                draggable={mode==='pan' && !vertexDragging.current}
+                dragBoundFunc={p=>clampPan(p)}
+                onDragStart={e=>{
+                  if(vertexDragging.current){
+                    e.target.stopDrag();
+                    return;
+                  }
                   panWasDragging.current=true;
                 }}
+                onDragMove={e=>{
+                  if(vertexDragging.current){
+                    e.target.stopDrag();
+                    return;
+                  }
+                  const p=clampPan({x:e.target.x(),y:e.target.y()});
+                  if(p.x!==e.target.x()||p.y!==e.target.y())e.target.position(p);
+                }}
                 onDragEnd={e=>{
-                  // Nu mutăm Stage-ul/canvasul. Păstrăm doar transformarea grupului intern.
-                  // Asta elimină "refresh-ul" / saltul vizual la mouse-up.
-                  setPos({x:e.target.x(),y:e.target.y()});
+                  if(vertexDragging.current)return;
+                  // Stage-ul rămâne fix. Doar viewportul intern primește poziția finală.
+                  const p=clampPan({x:e.target.x(),y:e.target.y()});
+                  e.target.position(p);
+                  setPos(p);
                   requestAnimationFrame(()=>{
                     panWasDragging.current=false;
                   });
@@ -344,7 +431,20 @@ export default function PlanEditor({floor,onChanged}){
                     stroke="#0a1811"
                     strokeWidth={1.5/scale}
                     draggable={mode==='edit'}
+                    dragBoundFunc={p=>({
+                      x:Math.max(imgRect.x,Math.min(imgRect.x+imgRect.w,p.x)),
+                      y:Math.max(imgRect.y,Math.min(imgRect.y+imgRect.h,p.y))
+                    })}
+                    onMouseDown={e=>{e.cancelBubble=true}}
+                    onTouchStart={e=>{e.cancelBubble=true}}
+                    onDragStart={beginVertexDrag}
                     onDragMove={e=>dragVertex(i,e)}
+                    onDragEnd={e=>{
+                      e.cancelBubble=true;
+                      vertexDragging.current=false;
+                      const viewport=viewportRef.current;
+                      if(viewport)viewport.draggable(mode==='pan');
+                    }}
                   />
                 ))}
               </>}
@@ -357,8 +457,9 @@ export default function PlanEditor({floor,onChanged}){
       </div>
 
       <p className="hint">
-        Snap-ul este activ pentru linii drepte. Implicit ai 0/90° și lipire pe vertex-uri.
-        Ține <b>Shift</b> pentru snap la 45°, iar <b>Alt/Option</b> pentru a desena temporar fără snap. Pan-ul mută acum doar viewportul intern, fără să refacă planul când eliberezi mouse-ul.
+        La <b>Editează</b>, punctele se mișcă liber, exact unde le tragi. Snap-ul la editare este oprit implicit;
+        îl activezi din <b>Snap edit</b> sau ții <b>Shift</b> temporar. La desenare rămân active 0/90°, 45° și lipirea pe vertex-uri.
+        Punctele sunt limitate strict la suprafața planului, iar pan-ul este limitat astfel încât planul nu mai poate ieși complet din viewport.
       </p>
     </div>
   );
