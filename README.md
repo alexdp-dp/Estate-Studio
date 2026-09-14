@@ -1,52 +1,41 @@
-# Estate Studio — Build 02 / Supabase
+# Estate Studio — Build 03 Complete
 
-This build no longer uses `data/project.json`. Projects, buildings, floors, apartments and polygons are loaded from and saved to Supabase.
+## Deploy direct pe GitHub + Render
+1. Pune conținutul ZIP-ului în root-ul repository-ului GitHub și fă commit/push.
+2. În Render creează/folosește un **Web Service / Node**.
+3. Build Command:
+   `npm install && npm run install:all && npm run build`
+4. Start Command:
+   `npm start`
+5. Environment:
+   - `SUPABASE_URL=https://tdcrjumaidgsdnohusmk.supabase.co`
+   - `SUPABASE_SERVICE_ROLE_KEY=sb_secret_...`
+   - `JWT_SECRET=<șir lung random>`
+   - `NODE_ENV=production`
 
-## Already created in Supabase
-Tables:
-- projects
-- buildings
-- floors
-- apartments
-- apartment_polygons
-- project_assets
+Schema necesară Build 03 a fost deja aplicată în proiectul Supabase `estate-studio`.
 
-Storage buckets:
-- models
-- floor-plans
-- project-images
-- apartment-images
+## Flux
+`/admin` → Projects → General → Blocuri → Model 3D → Etaje → Planuri & apartamente → Preview → Embed.
 
-## Render
-Create a Node Web Service connected to this GitHub repository.
+Fiecare proiect primește viewer public separat: `/embed/:slug` și cod iframe gata de copiat.
 
-Build command:
-`npm install && npm run install:all && npm run build`
+## Ce este implementat
+- proiecte multiple: create/edit/delete/duplicate/publish
+- blocuri multiple per proiect + poziționare X/Z și rotație
+- upload GLB/GLTF în Supabase Storage
+- calibrare runtime: real height / display units / up axis / auto ground
+- etaje independente de mesh, generate automat + intervale editabile
+- highlight real pe geometrie pentru intervalul etajului
+- upload planuri
+- apartamente și statusuri Available/Reserved/Sold
+- editor poligoane cu Konva, coordonate normalizate, zoom/pan, vertex drag, undo
+- viewer public cu perspective/top/front, zoom, reset, autorotate, fullscreen
+- plan public interactiv + detalii apartament
+- preview identic cu iframe
+- generator cod iframe
+- persistență Supabase + uploads Supabase Storage
+- documentație arhitecturală stocată per proiect
 
-Start command:
-`npm start`
-
-Environment variables:
-- `SUPABASE_URL=https://tdcrjumaidgsdnohusmk.supabase.co`
-- `SUPABASE_SERVICE_ROLE_KEY=` copy the service-role/secret key from Supabase Project Settings > API
-- `JWT_SECRET=` any long random string
-- `NODE_ENV=production`
-
-Never put the service-role key in the React client or commit it to GitHub.
-
-## Routes
-- `/` public 3D viewer
-- `/admin` admin
-- `/api/health` database connection check
-
-## Build 02 features
-- Supabase database persistence
-- Supabase Storage uploads for GLB and floor plans
-- Real-geometry floor highlight
-- Floor vertical ranges stored in DB
-- Apartment polygons stored as normalized 0..1 coordinates
-- Apartment statuses: available / reserved / sold
-- Public floor plan status overlay
-- Test admin login retained from Build 01
-
-The included local GLB remains only as a fallback/sample file. Once you upload a GLB in Admin, its Supabase Storage URL is saved in `projects.model_path`.
+## Notă despre generarea 3D din planuri
+Build-ul include modul de proiect `Documentație arhitecturală`, uploadurile și stocarea documentației. Generarea automată a unei geometrii comerciale detaliate din PDF/DWG necesită un motor extern de modelare/AI/CAD; build-ul nu pretinde că inventează acea geometrie în lipsa unui astfel de motor. Fluxul GLB/GLTF este complet funcțional.
