@@ -1,3 +1,22 @@
+# Estate Studio — Build 03.6 Auto Apartments
+
+Upgrade backward-compatible peste 03.5:
+- `Detectează apartamente` pe etajele care au plan;
+- analiză locală în browser, fără API AI/cost extern;
+- detectează pereții întunecați/groși;
+- identifică golurile transparente interioare ca probabilă scară / zonă comună;
+- segmentează zonele locuibile;
+- muchiile comune sunt împinse aproximativ spre axa mediană a pereților groși;
+- preview colorat înainte de salvare;
+- Auto sau număr estimat de apartamente;
+- sensibilitate pereți reglabilă;
+- `Nu e apartament` recalculează detectorul folosind zona drept comună;
+- mapare pe apartamente existente sau creare automată A01, A02...;
+- salvare bulk în `apartment_polygons`;
+- editorul manual, snap-ul și pan-ul stabil rămân intacte;
+- fără schimbări de schemă Supabase.
+
+`/api/version` => `03.6-auto-apartments`
 # Estate Studio — Build 03.5 Pan Stable
 
 Fix editor plan:

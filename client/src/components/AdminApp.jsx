@@ -3,6 +3,7 @@ import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'reac
 import {api,slugify,statusLabel} from '../api';
 const ThreeViewer=lazy(()=>import('./ThreeViewer'));
 const PlanEditor=lazy(()=>import('./PlanEditor'));
+const AutoApartmentDetector=lazy(()=>import('./AutoApartmentDetector'));
 
 const STEPS=[['general','General'],['buildings','Blocuri'],['model','Model 3D'],['calibration','Calibrare'],['floors','Etaje'],['plans','Planuri & apartamente'],['preview','Preview'],['embed','Embed']];
 function Login({onLogin}){const [username,setUsername]=useState('alexdarie'),[password,setPassword]=useState(''),[err,setErr]=useState('');const submit=async e=>{e.preventDefault();setErr('');try{await api('/auth/login',{method:'POST',body:{username,password}});onLogin()}catch(e){setErr(e.message)}};return <div className="login-page"><form onSubmit={submit} className="login-card"><div className="logo-mark">ES</div><h1>Estate Studio</h1><p>Platformă de configurare pentru experiențe imobiliare 3D.</p><label>Utilizator<input value={username} onChange={e=>setUsername(e.target.value)}/></label><label>Parolă<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button className="primary big">Autentificare</button>{err&&<div className="error-box">{err}</div>}</form></div>}
@@ -17,7 +18,79 @@ function Model({p,reload}){const [bid,setBid]=useState(p.buildings?.[0]?.id);con
 function Calibration({p,reload}){const [bid,setBid]=useState(p.buildings?.[0]?.id);const b=p.buildings.find(x=>x.id===bid)||p.buildings[0];if(!b)return null;async function patch(body){await api(`/admin/buildings/${b.id}`,{method:'PATCH',body});reload()}return <><SectionHead kicker="04 · CALIBRARE" title="Scară, axă și cota 0" desc="Adminul lucrează în metri reali; viewerul convertește automat în unitățile interne ale modelului." actions={<select value={b.id} onChange={e=>setBid(e.target.value)}>{p.buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>}/><div className="model-grid"><div className="panel preview-panel"><ThreeViewer buildings={[b]} selectedBuildingId={b.id}/></div><div className="panel settings-panel"><h3>{b.name}</h3><div className="form-grid one"><label>Înălțime reală clădire (m)<input type="number" step=".01" defaultValue={b.real_height_m||27} onBlur={e=>patch({real_height_m:+e.target.value})}/></label><label>Înălțime internă / display units<input type="number" step=".1" defaultValue={b.display_height_units||2.7} onBlur={e=>patch({display_height_units:+e.target.value})}/></label><label>Axa verticală<select defaultValue={b.model_up_axis||'Y'} onChange={e=>patch({model_up_axis:e.target.value})}><option>Y</option><option>Z</option><option>X</option></select></label><label className="check"><input type="checkbox" defaultChecked={b.auto_ground!==false} onChange={e=>patch({auto_ground:e.target.checked})}/> Așază baza modelului la cota 0</label></div><div className="notice">Scalare uniformă la runtime: <b>{b.real_height_m||27} m reali → {b.display_height_units||2.7} unități interne</b>. Intervalele etajelor sunt definite în metri și convertite automat pentru highlight.</div></div></div></>}
 function Floors({p,reload}){const [bid,setBid]=useState(p.buildings?.[0]?.id);const b=p.buildings.find(x=>x.id===bid)||p.buildings[0];const [cfg,setCfg]=useState({count:b?.floors_count||9,standard:b?.default_floor_height_m||3,groundDifferent:b?.ground_floor_different||false,ground:b?.ground_floor_height_m||3});useEffect(()=>{if(b)setCfg({count:b.floors_count||9,standard:b.default_floor_height_m||3,groundDifferent:b.ground_floor_different||false,ground:b.ground_floor_height_m||3})},[bid]);if(!b)return null;async function generate(){if((b.floors||[]).some(f=>(f.apartments||[]).length)&&!confirm('Regenerarea etajelor va șterge apartamentele existente. Continui?'))return;await api(`/admin/buildings/${b.id}/generate-floors`,{method:'POST',body:cfg});reload()}return <><SectionHead kicker="04 · ETAJE" title="Etaje și intervale verticale" desc="Etajele sunt independente de structura mesh-urilor din GLB. Intervalele pot fi ajustate individual." actions={<select value={b.id} onChange={e=>setBid(e.target.value)}>{p.buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>}/><div className="floors-layout"><div className="panel floor-generator"><h3>Generator</h3><label>Număr etaje / niveluri<input type="number" min="1" value={cfg.count} onChange={e=>setCfg({...cfg,count:+e.target.value})}/></label><label>Înălțime standard (m)<input type="number" step=".1" value={cfg.standard} onChange={e=>setCfg({...cfg,standard:+e.target.value})}/></label><label className="check"><input type="checkbox" checked={cfg.groundDifferent} onChange={e=>setCfg({...cfg,groundDifferent:e.target.checked})}/> Parterul are înălțime diferită</label>{cfg.groundDifferent&&<label>Înălțime parter (m)<input type="number" step=".1" value={cfg.ground} onChange={e=>setCfg({...cfg,ground:+e.target.value})}/></label>}<button className="primary big" onClick={generate}>Generează etajele</button></div><div className="panel"><div className="table"><div className="tr th"><span>Nivel</span><span>De la (m)</span><span>Până la (m)</span><span>Plan</span></div>{(b.floors||[]).map(f=><div className="tr" key={f.id}><input defaultValue={f.name} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{name:e.target.value}}).then(reload)}/><input type="number" step=".1" defaultValue={f.height_from_m} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{height_from_m:+e.target.value}}).then(reload)}/><input type="number" step=".1" defaultValue={f.height_to_m} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{height_to_m:+e.target.value}}).then(reload)}/><span>{f.plan_path?'✓':'—'}</span></div>)}</div>{(b.floors||[]).length===0&&<div className="empty-mini">Generează structura de etaje.</div>}</div></div></>}
 function ApartmentForm({project,floor,apartment,onSaved,onCancel}){const [f,setF]=useState(apartment||{code:'',title:'',status:'available',rooms:'',usable_area_sqm:'',total_area_sqm:'',price:'',currency:'EUR',description:'',external_url:''});const [imageFile,setImageFile]=useState(null);async function save(){const body={...f,floor_id:floor.id,rooms:f.rooms?+f.rooms:null,usable_area_sqm:f.usable_area_sqm?+f.usable_area_sqm:null,total_area_sqm:f.total_area_sqm?+f.total_area_sqm:null,price:f.price?+f.price:null};let saved=apartment;if(apartment)saved=await api(`/admin/apartments/${apartment.id}`,{method:'PATCH',body});else saved=await api('/admin/apartments',{method:'POST',body});if(imageFile&&saved?.id){const fd=new FormData();fd.append('file',imageFile);fd.append('project_id',project.id);fd.append('floor_id',floor.id);fd.append('apartment_id',saved.id);fd.append('asset_type','apartment-image');const u=await api('/admin/upload/apartment-images',{method:'POST',body:fd});await api(`/admin/apartments/${saved.id}`,{method:'PATCH',body:{image_path:u.url}})}onSaved()}return <div className="drawer"><div className="drawer-card"><button className="x" onClick={onCancel}>×</button><h2>{apartment?'Editează':'Apartament nou'}</h2>{(apartment?.image_path||f.image_path)&&<img className="apartment-form-image" src={apartment?.image_path||f.image_path}/>}<label className="button-file image-upload"><input type="file" accept="image/*" onChange={e=>setImageFile(e.target.files[0]||null)}/>{imageFile?`Imagine selectată: ${imageFile.name}`:'Încarcă imagine apartament'}</label><div className="form-grid"><label>Cod<input value={f.code} onChange={e=>setF({...f,code:e.target.value})}/></label><label>Status<select value={f.status} onChange={e=>setF({...f,status:e.target.value})}><option value="available">Disponibil</option><option value="reserved">Rezervat</option><option value="sold">Vândut</option></select></label><label className="wide">Titlu<input value={f.title||''} onChange={e=>setF({...f,title:e.target.value})}/></label><label>Camere<input type="number" value={f.rooms||''} onChange={e=>setF({...f,rooms:e.target.value})}/></label><label>Suprafață utilă<input type="number" step=".01" value={f.usable_area_sqm||''} onChange={e=>setF({...f,usable_area_sqm:e.target.value})}/></label><label>Suprafață totală<input type="number" step=".01" value={f.total_area_sqm||''} onChange={e=>setF({...f,total_area_sqm:e.target.value})}/></label><label>Preț<input type="number" value={f.price||''} onChange={e=>setF({...f,price:e.target.value})}/></label><label>Monedă<input value={f.currency||'EUR'} onChange={e=>setF({...f,currency:e.target.value})}/></label><label className="wide">URL apartament<input value={f.external_url||''} onChange={e=>setF({...f,external_url:e.target.value})}/></label><label className="wide">Descriere<textarea rows="4" value={f.description||''} onChange={e=>setF({...f,description:e.target.value})}/></label></div><button className="primary big" onClick={save}>Salvează apartamentul</button></div></div>}
-function Plans({p,reload}){const [bid,setBid]=useState(p.buildings?.[0]?.id);const b=p.buildings.find(x=>x.id===bid)||p.buildings[0];const [fid,setFid]=useState(b?.floors?.[0]?.id);useEffect(()=>{if(!b?.floors?.find(x=>x.id===fid))setFid(b?.floors?.[0]?.id)},[bid,p]);const f=b?.floors?.find(x=>x.id===fid)||b?.floors?.[0];const [edit,setEdit]=useState(null),[newOpen,setNewOpen]=useState(false);if(!b)return null;async function uploadPlan(file){const fd=new FormData();fd.append('file',file);fd.append('project_id',p.id);fd.append('building_id',b.id);fd.append('floor_id',f.id);fd.append('asset_type','floor-plan');const u=await api('/admin/upload/floor-plans',{method:'POST',body:fd});await api(`/admin/floors/${f.id}`,{method:'PATCH',body:{plan_path:u.url}});reload()}return <><SectionHead kicker="05 · PLANURI & APARTAMENTE" title="Plan interactiv" desc="Încarcă planul, creează apartamentele și trasează poligoanele exact peste imagine." actions={<div className="inline-selects"><select value={b.id} onChange={e=>setBid(e.target.value)}>{p.buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select><select value={f?.id||''} onChange={e=>setFid(e.target.value)}>{(b.floors||[]).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></div>}/>{!f?<div className="empty-state"><b>Nu există etaje.</b><span>Generează etajele înainte de a adăuga planuri.</span></div>:<><div className="panel plan-head"><div><h3>{f.name}</h3><p>{f.height_from_m}–{f.height_to_m} m · {(f.apartments||[]).length} apartamente</p></div><div><label className="button-file"><input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadPlan(e.target.files[0])}/>{f.plan_path?'Înlocuiește planul':'Încarcă planul'}</label><button className="primary" onClick={()=>setNewOpen(true)}>＋ Apartament</button></div></div><div className="panel apartment-table"><div className="table"><div className="tr th"><span>Cod</span><span>Status</span><span>Camere</span><span>Suprafață</span><span></span></div>{(f.apartments||[]).map(a=><div className="tr" key={a.id}><b>{a.code}</b><span className={'status-pill '+a.status}>{statusLabel[a.status]}</span><span>{a.rooms||'—'}</span><span>{a.usable_area_sqm?`${a.usable_area_sqm} m²`:'—'}</span><div className="row-actions"><button onClick={()=>setEdit(a)}>Editează</button><button className="danger-ghost" onClick={async()=>{if(confirm(`Șterg ${a.code}?`)){await api(`/admin/apartments/${a.id}`,{method:'DELETE'});reload()}}}>Șterge</button></div></div>)}</div></div><PlanEditor floor={f} onChanged={reload}/>{(newOpen||edit)&&<ApartmentForm project={p} floor={f} apartment={edit} onSaved={()=>{setEdit(null);setNewOpen(false);reload()}} onCancel={()=>{setEdit(null);setNewOpen(false)}}/>}</>}</>}
+function Plans({p,reload}){
+  const [bid,setBid]=useState(p.buildings?.[0]?.id);
+  const b=p.buildings.find(x=>x.id===bid)||p.buildings[0];
+  const [fid,setFid]=useState(b?.floors?.[0]?.id);
+  const [edit,setEdit]=useState(null),[newOpen,setNewOpen]=useState(false),[autoOpen,setAutoOpen]=useState(false);
+
+  useEffect(()=>{
+    if(!b?.floors?.find(x=>x.id===fid))setFid(b?.floors?.[0]?.id)
+  },[bid,p]);
+
+  const f=b?.floors?.find(x=>x.id===fid)||b?.floors?.[0];
+  if(!b)return null;
+
+  async function uploadPlan(file){
+    const fd=new FormData();
+    fd.append('file',file);
+    fd.append('project_id',p.id);
+    fd.append('building_id',b.id);
+    fd.append('floor_id',f.id);
+    fd.append('asset_type','floor-plan');
+    const u=await api('/admin/upload/floor-plans',{method:'POST',body:fd});
+    await api(`/admin/floors/${f.id}`,{method:'PATCH',body:{plan_path:u.url}});
+    reload();
+  }
+
+  return <>
+    <SectionHead
+      kicker="05 · PLANURI & APARTAMENTE"
+      title="Plan interactiv"
+      desc="Încarcă planul, detectează automat apartamentele sau trasează manual poligoanele."
+      actions={<div className="inline-selects">
+        <select value={b.id} onChange={e=>setBid(e.target.value)}>{p.buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
+        <select value={f?.id||''} onChange={e=>setFid(e.target.value)}>{(b.floors||[]).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
+      </div>}
+    />
+
+    {!f?<div className="empty-state"><b>Nu există etaje.</b><span>Generează etajele înainte de a adăuga planuri.</span></div>:<>
+      <div className="panel plan-head">
+        <div><h3>{f.name}</h3><p>{f.height_from_m}–{f.height_to_m} m · {(f.apartments||[]).length} apartamente</p></div>
+        <div>
+          <label className="button-file">
+            <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadPlan(e.target.files[0])}/>
+            {f.plan_path?'Înlocuiește planul':'Încarcă planul'}
+          </label>
+          {f.plan_path&&<button className="auto-detect-btn" onClick={()=>setAutoOpen(true)}>✦ Detectează apartamente</button>}
+          <button className="primary" onClick={()=>setNewOpen(true)}>＋ Apartament</button>
+        </div>
+      </div>
+
+      <div className="panel apartment-table">
+        <div className="table">
+          <div className="tr th"><span>Cod</span><span>Status</span><span>Camere</span><span>Suprafață</span><span></span></div>
+          {(f.apartments||[]).map(a=><div className="tr" key={a.id}>
+            <b>{a.code}</b>
+            <span className={'status-pill '+a.status}>{statusLabel[a.status]}</span>
+            <span>{a.rooms||'—'}</span>
+            <span>{a.usable_area_sqm?`${a.usable_area_sqm} m²`:'—'}</span>
+            <div className="row-actions">
+              <button onClick={()=>setEdit(a)}>Editează</button>
+              <button className="danger-ghost" onClick={async()=>{if(confirm(`Șterg ${a.code}?`)){await api(`/admin/apartments/${a.id}`,{method:'DELETE'});reload()}}}>Șterge</button>
+            </div>
+          </div>)}
+        </div>
+      </div>
+
+      <PlanEditor floor={f} onChanged={reload}/>
+
+      {autoOpen&&<AutoApartmentDetector floor={f} onClose={()=>setAutoOpen(false)} onCommitted={reload}/>}
+      {(newOpen||edit)&&<ApartmentForm project={p} floor={f} apartment={edit} onSaved={()=>{setEdit(null);setNewOpen(false);reload()}} onCancel={()=>{setEdit(null);setNewOpen(false)}}/>}
+    </>}
+  </>
+}
+
 function Preview({p}){return <><SectionHead kicker="06 · PREVIEW" title="Exact ce va vedea clientul" desc="Viewerul de mai jos este aceeași rută folosită în iframe."/><div className="panel iframe-preview"><iframe src={`/embed/${p.slug}?preview=1`} title="Preview"/></div></>}
 function Embed({p,reload}){const origin=window.location.origin;const code=`<iframe\n  src="${origin}/embed/${p.slug}"\n  width="100%"\n  height="${p.embed_height||760}"\n  style="border:0"\n  allowfullscreen\n  loading="lazy"\n></iframe>`;return <><SectionHead kicker="07 · EMBED" title="Integrare în site" desc="Copiază codul și inserează-l în pagina clientului."/><div className="embed-admin-grid"><div className="panel"><h3>Cod iframe</h3><pre className="codebox">{code}</pre><button className="primary" onClick={()=>navigator.clipboard.writeText(code)}>Copiază codul</button></div><div className="panel"><h3>Setări</h3><label>Înălțime iframe (px)<input type="number" defaultValue={p.embed_height||760} onBlur={async e=>{await api(`/admin/projects/${p.id}`,{method:'PATCH',body:{embed_height:+e.target.value}});reload()}}/></label><label>URL direct<input readOnly value={`${origin}/embed/${p.slug}`}/></label><a className="button-link" href={`/embed/${p.slug}`} target="_blank" rel="noreferrer">Deschide viewerul ↗</a></div></div></>}
 function Project(){const {id,section='general'}=useParams();const [p,setP]=useState(null),[err,setErr]=useState('');const load=()=>api(`/admin/projects/${id}`).then(setP).catch(e=>setErr(e.message));useEffect(load,[id]);if(err)return <Shell><div className="content"><div className="error-box">{err}</div></div></Shell>;if(!p)return <div className="page-loading">Se încarcă proiectul…</div>;let comp={general:<General p={p} reload={load}/>,buildings:<Buildings p={p} reload={load}/>,model:<Model p={p} reload={load}/>,calibration:<Calibration p={p} reload={load}/>,floors:<Floors p={p} reload={load}/>,plans:<Plans p={p} reload={load}/>,preview:<Preview p={p}/>,embed:<Embed p={p} reload={load}/>}[section]||<General p={p} reload={load}/>;return <ProjectShell project={p} reload={load}>{comp}</ProjectShell>}
