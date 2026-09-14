@@ -1,3 +1,16 @@
+# Estate Studio — Build 03.2 Interactions
+
+Fixuri:
+- poligoanele salvate în Supabase se încarcă din nou corect (relația one-to-one poate veni ca obiect, nu array);
+- confirmare vizibilă după salvarea poligonului;
+- hover pe clădire;
+- hover pe etaj calculat din punctul 3D intersectat și intervalele verticale configurate;
+- highlight verde pe etajul de sub mouse;
+- tooltip cu numele blocului și etajului;
+- click direct pe etaj din model deschide planul etajului;
+- click pe bloc îl selectează;
+- versiune: `/api/version` => `03.2-interactions`.
+
 # Estate Studio — Build 03.1 Hotfix
 
 Hotfix pentru ecranul alb:
