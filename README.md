@@ -1,3 +1,14 @@
+# Estate Studio — Build 03.4 Polygon Snap
+
+Fix / upgrade:
+- snap pentru desenarea poligoanelor;
+- `Snap 0/90°` pentru segmente perfect orizontale/verticale;
+- `45°` opțional;
+- `Vertices` pentru lipire la puncte existente / închidere mai precisă;
+- `Shift` = forțează 45°;
+- `Alt/Option` = desenează temporar fără snap;
+- snap funcționează și la mutarea vertex-urilor.
+
 # Estate Studio — Build 03.3 Button Fix
 
 Fix UI:

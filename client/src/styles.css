@@ -62,3 +62,9 @@ a.primary:hover,
 .card-actions button:not(.primary) {
   color: var(--ink);
 }
+
+
+/* Build 03.4 - polygon snap controls */
+.snap-controls{
+  margin-left: 10px;
+}
