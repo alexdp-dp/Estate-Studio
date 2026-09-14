@@ -41,15 +41,192 @@ function FloorPublic({floor,close}){
   </svg></div><div className="legend"><span className="available">Disponibil</span><span className="reserved">Rezervat</span><span className="sold">Vândut</span></div></div></div>
 }
 function Login({done}){const[u,setU]=useState('alexdarie'),[p,setP]=useState(''),[err,setErr]=useState('');async function go(e){e.preventDefault();const r=await fetch(API+'/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});r.ok?done():setErr('User sau parolă incorecte')}return <div className="login"><form onSubmit={go}><h1>Estate Studio</h1><p>Administrare Supabase</p><input value={u} onChange={e=>setU(e.target.value)}/><input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="Parolă"/><button>Autentificare</button>{err&&<em>{err}</em>}</form></div>}
-function PlanEditor({floor,reload}){
- const [pts,setPts]=useState([]),[drag,setDrag]=useState(-1),[code,setCode]=useState('A01'),[status,setStatus]=useState('available'),box=useRef();
- function point(e){const r=box.current.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height}}
- async function save(){if(pts.length<3)return;let r=await fetch(API+'/admin/apartments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({floor_id:floor.id,code,status})});let a=await r.json();if(!r.ok)return alert(a.error);await fetch(API+`/admin/apartments/${a.id}/polygon`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({points:pts})});setPts([]);reload()}
- return <><div className="editorbar"><input value={code} onChange={e=>setCode(e.target.value)}/><select value={status} onChange={e=>setStatus(e.target.value)}><option value="available">Disponibil</option><option value="reserved">Rezervat</option><option value="sold">Vândut</option></select><button onClick={()=>setPts(v=>v.slice(0,-1))}>↶</button><button className="primary" onClick={save}>Salvează apartamentul</button></div>
- <div ref={box} className="planbox" onClick={e=>{if(e.target.dataset.vertex)return;setPts(v=>[...v,point(e)])}}>{floor.plan_path?<img src={floor.plan_path}/>:<div className="planplaceholder">Încarcă întâi planul etajului</div>}<svg viewBox="0 0 100 100" preserveAspectRatio="none">
- {(floor.apartments||[]).map(a=>{let ps=a.apartment_polygons?.[0]?.points||[];return ps.length>2?<polygon key={a.id} className={statusClass[a.status]} points={ps.map(p=>`${p.x*100},${p.y*100}`).join(' ')}/>:null})}
- {pts.length>1&&<polyline points={pts.map(p=>`${p.x*100},${p.y*100}`).join(' ')} fill={pts.length>2?'rgba(31,190,104,.2)':'none'} stroke="#111" strokeWidth=".35"/>}
- {pts.map((p,i)=><circle key={i} data-vertex="1" cx={p.x*100} cy={p.y*100} r=".7" fill="#fff" stroke="#111" strokeWidth=".3" onPointerDown={e=>{e.stopPropagation();setDrag(i);e.currentTarget.setPointerCapture(e.pointerId)}} onPointerMove={e=>{if(drag===i){e.stopPropagation();const q=point(e);setPts(v=>v.map((x,j)=>j===i?q:x))}} onPointerUp={e=>{setDrag(-1);e.currentTarget.releasePointerCapture(e.pointerId)}}/>)}</svg></div></>
+function PlanEditor({ floor, reload }) {
+  const [pts, setPts] = useState([]);
+  const [drag, setDrag] = useState(-1);
+  const [code, setCode] = useState('A01');
+  const [status, setStatus] = useState('available');
+  const box = useRef();
+
+  function point(e) {
+    const r = box.current.getBoundingClientRect();
+
+    return {
+      x: (e.clientX - r.left) / r.width,
+      y: (e.clientY - r.top) / r.height
+    };
+  }
+
+  async function save() {
+    if (pts.length < 3) return;
+
+    let r = await fetch(API + '/admin/apartments', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        floor_id: floor.id,
+        code,
+        status
+      })
+    });
+
+    let a = await r.json();
+
+    if (!r.ok) {
+      return alert(a.error);
+    }
+
+    await fetch(API + `/admin/apartments/${a.id}/polygon`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        points: pts
+      })
+    });
+
+    setPts([]);
+    reload();
+  }
+
+  return (
+    <>
+      <div className="editorbar">
+        <input
+          value={code}
+          onChange={e => setCode(e.target.value)}
+        />
+
+        <select
+          value={status}
+          onChange={e => setStatus(e.target.value)}
+        >
+          <option value="available">Disponibil</option>
+          <option value="reserved">Rezervat</option>
+          <option value="sold">Vândut</option>
+        </select>
+
+        <button
+          onClick={() => setPts(v => v.slice(0, -1))}
+        >
+          ↶
+        </button>
+
+        <button
+          className="primary"
+          onClick={save}
+        >
+          Salvează apartamentul
+        </button>
+      </div>
+
+      <div
+        ref={box}
+        className="planbox"
+        onClick={e => {
+          if (e.target.dataset.vertex) return;
+
+          setPts(v => [
+            ...v,
+            point(e)
+          ]);
+        }}
+      >
+        {floor.plan_path ? (
+          <img
+            src={floor.plan_path}
+            alt={`Plan ${floor.name}`}
+          />
+        ) : (
+          <div className="planplaceholder">
+            Încarcă întâi planul etajului
+          </div>
+        )}
+
+        <svg
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+        >
+          {(floor.apartments || []).map(a => {
+            const ps =
+              a.apartment_polygons?.[0]?.points || [];
+
+            return ps.length > 2 ? (
+              <polygon
+                key={a.id}
+                className={statusClass[a.status]}
+                points={ps
+                  .map(p => `${p.x * 100},${p.y * 100}`)
+                  .join(' ')}
+              />
+            ) : null;
+          })}
+
+          {pts.length > 1 && (
+            <polyline
+              points={pts
+                .map(p => `${p.x * 100},${p.y * 100}`)
+                .join(' ')}
+              fill={
+                pts.length > 2
+                  ? 'rgba(31,190,104,.2)'
+                  : 'none'
+              }
+              stroke="#111"
+              strokeWidth=".35"
+            />
+          )}
+
+          {pts.map((p, i) => (
+            <circle
+              key={i}
+              data-vertex="1"
+              cx={p.x * 100}
+              cy={p.y * 100}
+              r=".7"
+              fill="#fff"
+              stroke="#111"
+              strokeWidth=".3"
+
+              onPointerDown={e => {
+                e.stopPropagation();
+                setDrag(i);
+
+                e.currentTarget.setPointerCapture(
+                  e.pointerId
+                );
+              }}
+
+              onPointerMove={e => {
+                if (drag === i) {
+                  e.stopPropagation();
+
+                  const q = point(e);
+
+                  setPts(v =>
+                    v.map((x, j) =>
+                      j === i ? q : x
+                    )
+                  );
+                }
+              }}
+
+              onPointerUp={e => {
+                setDrag(-1);
+
+                e.currentTarget.releasePointerCapture(
+                  e.pointerId
+                );
+              }}
+            />
+          ))}
+        </svg>
+      </div>
+    </>
+  );
 }
 function Admin({project,reload}){
  const b=project.buildings?.[0], [floorId,setFloorId]=useState(b?.floors?.[0]?.id||''); const floor=b?.floors?.find(f=>f.id===floorId)||b?.floors?.[0];
