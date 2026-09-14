@@ -16,7 +16,7 @@ function verifyPassword(password,record){const [,it,salt64,hash64]=record.split(
 function auth(req,res,next){try{req.user=jwt.verify(req.cookies.es_token,JWT_SECRET);next()}catch{res.status(401).json({error:'Unauthorized'})}}
 function clean(o,allowed){return Object.fromEntries(Object.entries(o||{}).filter(([k])=>allowed.includes(k)))}
 function send(res,data,error,status=500){if(error)return res.status(status).json({error:error.message||String(error)});res.json(data)}
-app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.0.2-dwg-plan-crop',time:'2026-09-14'}));
+app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.0.3-integer-floor-dimensions-fix',time:'2026-09-14'}));
 app.get('/api/health',async(req,res)=>{const {error}=await sb.from('projects').select('id',{head:true,count:'exact'});res.status(error?500:200).json({ok:!error,supabase:!error,error:error?.message})});
 app.post('/api/auth/login',(req,res)=>{if(req.body?.username===ADMIN_USER&&verifyPassword(String(req.body?.password||''),ADMIN_HASH)){const token=jwt.sign({sub:ADMIN_USER},JWT_SECRET,{expiresIn:'24h'});res.cookie('es_token',token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',maxAge:86400000});return res.json({ok:true,user:ADMIN_USER})}res.status(401).json({error:'User sau parolă incorecte'})});
 app.get('/api/auth/me',auth,(req,res)=>res.json({user:req.user.sub}));
@@ -39,7 +39,41 @@ app.patch('/api/admin/buildings/:id',auth,async(req,res)=>{const {data,error}=aw
 app.delete('/api/admin/buildings/:id',auth,async(req,res)=>{const {data,error}=await sb.from('buildings').delete().eq('id',req.params.id).select();send(res,data,error)});
 app.post('/api/admin/buildings/:id/generate-floors',auth,async(req,res)=>{try{const count=Math.max(1,Math.min(100,Number(req.body.count)||1)),standard=Number(req.body.standard)||3,gd=!!req.body.groundDifferent,ground=gd?(Number(req.body.ground)||standard):standard;await sb.from('floors').delete().eq('building_id',req.params.id);let from=0;const rows=[];for(let i=0;i<count;i++){const h=i===0?ground:standard;rows.push({building_id:req.params.id,name:i===0?'Parter':`Etaj ${i}`,floor_number:i,sort_order:i,height_from_m:from,height_to_m:from+h});from+=h}const {data,error}=await sb.from('floors').insert(rows).select();if(error)throw error;await sb.from('buildings').update({floors_count:count,default_floor_height_m:standard,ground_floor_different:gd,ground_floor_height_m:ground,real_height_m:from}).eq('id',req.params.id);res.json(data)}catch(e){send(res,null,e)}});
 const floorAllowed=['name','floor_number','sort_order','height_from_m','height_to_m','plan_path','model_node_name','plan_width','plan_height','settings'];
-app.patch('/api/admin/floors/:id',auth,async(req,res)=>{const {data,error}=await sb.from('floors').update(clean(req.body,floorAllowed)).eq('id',req.params.id).select().single();send(res,data,error)});
+
+function sanitizeFloorPatch(body){
+  const out=clean(body,floorAllowed);
+
+  // PostgreSQL columns below are INTEGER. CAD/SVG libraries often return float
+  // dimensions such as 10.699999809265137, so never forward them raw to Supabase.
+  for(const key of ['floor_number','sort_order','plan_width','plan_height']){
+    if(!(key in out))continue;
+
+    if(out[key]===null || out[key]===''){
+      out[key]=null;
+      continue;
+    }
+
+    const value=Number(out[key]);
+    if(!Number.isFinite(value)){
+      delete out[key];
+      continue;
+    }
+
+    out[key]=Math.round(value);
+  }
+
+  // Preview dimensions should always be positive practical image dimensions.
+  if(Number.isFinite(out.plan_width))out.plan_width=Math.max(1,Math.min(100000,out.plan_width));
+  if(Number.isFinite(out.plan_height))out.plan_height=Math.max(1,Math.min(100000,out.plan_height));
+
+  return out;
+}
+
+app.patch('/api/admin/floors/:id',auth,async(req,res)=>{
+  const payload=sanitizeFloorPatch(req.body);
+  const {data,error}=await sb.from('floors').update(payload).eq('id',req.params.id).select().single();
+  send(res,data,error);
+});
 const apartmentAllowed=['floor_id','code','title','status','rooms','usable_area_sqm','total_area_sqm','price','currency','description','model_node_name','image_path','external_url','settings'];
 app.post('/api/admin/apartments',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').insert(clean(req.body,apartmentAllowed)).select().single();send(res,data,error)});
 app.patch('/api/admin/apartments/:id',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').update(clean(req.body,apartmentAllowed)).eq('id',req.params.id).select().single();send(res,data,error)});
@@ -47,6 +81,6 @@ app.delete('/api/admin/apartments/:id',auth,async(req,res)=>{const {data,error}=
 app.put('/api/admin/apartments/:id/polygon',auth,async(req,res)=>{const points=(req.body.points||[]).map(p=>({x:Math.max(0,Math.min(1,Number(p.x))),y:Math.max(0,Math.min(1,Number(p.y)))}));const {data,error}=await sb.from('apartment_polygons').upsert({apartment_id:req.params.id,points},{onConflict:'apartment_id'}).select().single();send(res,data,error)});
 
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:100*1024*1024}});const buckets=new Set(['models','floor-plans','project-images','apartment-images','project-documents']);
-app.post('/api/admin/upload/:bucket',auth,upload.single('file'),async(req,res)=>{try{const bucket=req.params.bucket;if(!buckets.has(bucket))return res.status(400).json({error:'Bucket invalid'});if(!req.file)return res.status(400).json({error:'Fișier lipsă'});const safe=req.file.originalname.replace(/[^a-zA-Z0-9._-]+/g,'-');const prefix=[req.body.project_id,req.body.building_id,req.body.floor_id,req.body.apartment_id].filter(Boolean).join('/');const objectPath=`${prefix?prefix+'/':''}${Date.now()}-${safe}`;const {error}=await sb.storage.from(bucket).upload(objectPath,req.file.buffer,{contentType:req.file.mimetype,upsert:false});if(error)throw error;let url=null;if(bucket!=='project-documents')url=sb.storage.from(bucket).getPublicUrl(objectPath).data.publicUrl;const asset={project_id:req.body.project_id||null,building_id:req.body.building_id||null,floor_id:req.body.floor_id||null,apartment_id:req.body.apartment_id||null,asset_type:req.body.asset_type||'upload',storage_bucket:bucket,storage_path:objectPath,label:req.body.label||req.file.originalname,file_name:req.file.originalname,mime_type:req.file.mimetype,file_size:req.file.size,metadata:{}};if(asset.project_id)await sb.from('project_assets').insert(asset);res.json({bucket,path:objectPath,url,file_name:req.file.originalname})}catch(e){send(res,null,e)}});
+app.post('/api/admin/upload/:bucket',auth,upload.single('file'),async(req,res)=>{try{const bucket=req.params.bucket;if(!buckets.has(bucket))return res.status(400).json({error:'Bucket invalid'});if(!req.file)return res.status(400).json({error:'Fișier lipsă'});const safe=req.file.originalname.replace(/[^a-zA-Z0-9._-]+/g,'-');const prefix=[req.body.project_id,req.body.building_id,req.body.floor_id,req.body.apartment_id].filter(Boolean).join('/');const objectPath=`${prefix?prefix+'/':''}${Date.now()}-${safe}`;const {error}=await sb.storage.from(bucket).upload(objectPath,req.file.buffer,{contentType:req.file.mimetype,upsert:false});if(error)throw error;let url=null;if(bucket!=='project-documents')url=sb.storage.from(bucket).getPublicUrl(objectPath).data.publicUrl;const asset={project_id:req.body.project_id||null,building_id:req.body.building_id||null,floor_id:req.body.floor_id||null,apartment_id:req.body.apartment_id||null,asset_type:req.body.asset_type||'upload',storage_bucket:bucket,storage_path:objectPath,label:req.body.label||req.file.originalname,file_name:req.file.originalname,mime_type:req.file.mimetype,file_size:Math.round(Number(req.file.size)||0),metadata:{}};if(asset.project_id)await sb.from('project_assets').insert(asset);res.json({bucket,path:objectPath,url,file_name:req.file.originalname})}catch(e){send(res,null,e)}});
 app.get('/api/public/projects/:slug',async(req,res)=>{const {data,error}=await sb.from('projects').select('*').eq('slug',req.params.slug).maybeSingle();if(error)return send(res,null,error);if(!data)return res.status(404).json({error:'Proiect inexistent'});if(!data.is_published&&req.query.preview!=='1')return res.status(404).json({error:'Proiectul nu este publicat'});try{res.json(await treeByProject(data))}catch(e){send(res,null,e)}});
 const dist=path.join(__dirname,'../client/dist');app.use(express.static(dist));app.get('*',(req,res)=>res.sendFile(path.join(dist,'index.html')));const PORT=process.env.PORT||3000;app.listen(PORT,'0.0.0.0',()=>console.log(`Estate Studio Build 03.7 on :${PORT}`));

@@ -1,3 +1,34 @@
+# Estate Studio — Build 04.0.3 Integer Floor Dimensions Fix
+
+Fix definitiv pentru erori de forma:
+
+`invalid input syntax for type integer: "10.699999809265137"`
+
+## Cauza
+În schema Supabase:
+- `floors.plan_width` = INTEGER
+- `floors.plan_height` = INTEGER
+- `floors.floor_number` = INTEGER
+- `floors.sort_order` = INTEGER
+
+Unele DWG/SVG-uri raportează dimensiuni float, de ex. `10.699999809265137`.
+
+## Fix
+Backendul sanitizează acum TOATE update-urile de etaj:
+- `plan_width` → `Math.round(...)`
+- `plan_height` → `Math.round(...)`
+- `floor_number` → integer
+- `sort_order` → integer
+
+Asta înseamnă că chiar dacă un client/browser sau o versiune veche a importerului trimite `10.699999809265137`, serverul trimite către PostgreSQL `11`.
+
+În plus:
+- importerul 04.0.2 păstrează în continuare coordonatele CAD reale în `settings.cad`;
+- câmpurile de preview rămân dimensiuni integer normalizate;
+- DWG crop workflow rămâne neschimbat.
+
+`/api/version` => `04.0.3-integer-floor-dimensions-fix`
+
 # Estate Studio — Build 04.0.2 DWG Plan Crop
 
 Fix pentru DWG-uri foarte mari care conțin mai multe planuri pe aceeași planșă.

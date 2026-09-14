@@ -577,8 +577,8 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
           plan_path:preview.url,
 
           // IMPORTANT: Supabase columns are integers. Never put DWG world coordinates here.
-          plan_width:cropped.previewWidth,
-          plan_height:cropped.previewHeight,
+          plan_width:Math.round(cropped.previewWidth),
+          plan_height:Math.round(cropped.previewHeight),
           settings
         }
       });
