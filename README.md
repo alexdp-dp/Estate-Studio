@@ -1,3 +1,11 @@
+# Estate Studio — Build 03.3 Button Fix
+
+Fix UI:
+- butoanele `.primary` rămân negre cu text alb în stare normală;
+- regula contextuală `.card-actions button` nu mai poate transforma butonul „Deschide” în alb cu text alb;
+- combinația `.primary.button-link` este corectă (ex. „Vezi apartamentul”);
+- butoanele secundare albe au explicit text închis.
+
 # Estate Studio — Build 03.2 Interactions
 
 Fixuri:

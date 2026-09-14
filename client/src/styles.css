@@ -33,3 +33,32 @@
 .model-tooltip span{font-size:12px;margin-top:3px;color:#b9f4d2}
 .model-tooltip small{font-size:10px;margin-top:6px;color:#b9c3bd}
 .save-notice{font-size:12px;font-weight:700;color:#12834a;white-space:nowrap}
+
+
+/* Build 03.3 — primary button visibility fix.
+   Some contextual rules (.card-actions button / .button-link) were overriding
+   the primary background while leaving the primary text white. */
+.primary,
+button.primary,
+a.primary,
+.card-actions button.primary,
+.button-link.primary {
+  background: var(--ink) !important;
+  color: #fff !important;
+  border-color: var(--ink) !important;
+}
+
+.primary:hover,
+button.primary:hover,
+a.primary:hover,
+.card-actions button.primary:hover,
+.button-link.primary:hover {
+  background: #243029 !important;
+  color: #fff !important;
+  border-color: #243029 !important;
+}
+
+.button-link:not(.primary),
+.card-actions button:not(.primary) {
+  color: var(--ink);
+}
