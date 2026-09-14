@@ -359,19 +359,8 @@ function BuildingBubbleLayer({buildings,boundsMap,selectedBuildingId,onSelectBui
 
 function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsRef,focusTick=0,cinematic=false}){
   const {camera}=useThree();
-  const anim=useRef(null);
-  const previousSelection=useRef(selectedBuildingId);
+  const tween=useRef(null);
 
-  function easeInOutQuint(t){
-    return t<.5 ? 16*t*t*t*t*t : 1-Math.pow(-2*t+2,5)/2;
-  }
-  function cubicBezier(a,b,c,d,t){
-    const it=1-t;
-    return a.clone().multiplyScalar(it*it*it)
-      .add(b.clone().multiplyScalar(3*it*it*t))
-      .add(c.clone().multiplyScalar(3*it*t*t))
-      .add(d.clone().multiplyScalar(t*t*t));
-  }
   function unionBounds(boxes){
     if(!boxes.length)return null;
     return {
@@ -383,7 +372,8 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
       maxZ:Math.max(...boxes.map(b=>b.maxZ))
     };
   }
-  function boxCenter(box){
+
+  function centerOf(box){
     return new THREE.Vector3(
       (box.minX+box.maxX)/2,
       (box.minY+box.maxY)/2,
@@ -391,219 +381,112 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
     );
   }
 
-  function expandedBox(box,pad=.12){
-    return {
-      minX:box.minX-pad,maxX:box.maxX+pad,
-      minY:box.minY-pad,maxY:box.maxY+pad,
-      minZ:box.minZ-pad,maxZ:box.maxZ+pad
-    };
-  }
-
-  function pointInsideBox(p,box){
-    return p.x>=box.minX&&p.x<=box.maxX&&
-           p.y>=box.minY&&p.y<=box.maxY&&
-           p.z>=box.minZ&&p.z<=box.maxZ;
-  }
-
-  // Slab-test: does the camera->target segment cross an AABB?
-  function segmentIntersectsBox(a,b,box){
-    const d=b.clone().sub(a);
-    let tMin=0,tMax=1;
-    for(const [axis,minK,maxK] of [['x','minX','maxX'],['y','minY','maxY'],['z','minZ','maxZ']]){
-      const av=a[axis],dv=d[axis],mn=box[minK],mx=box[maxK];
-      if(Math.abs(dv)<1e-8){
-        if(av<mn||av>mx)return false;
-      }else{
-        let t1=(mn-av)/dv,t2=(mx-av)/dv;
-        if(t1>t2){const tmp=t1;t1=t2;t2=tmp}
-        tMin=Math.max(tMin,t1);
-        tMax=Math.min(tMax,t2);
-        if(tMin>tMax)return false;
-      }
-    }
-    return tMax>0.03 && tMin<.97;
-  }
-
-  function chooseClearPerspectiveDirection(target,distance,height,selectedId){
-    const otherBoxes=Object.entries(boundsMap)
-      .filter(([id])=>id!==selectedId && !id.startsWith('__'))
-      .map(([id,b])=>({id,box:expandedBox(b,Math.max(.12,Math.min(.35,distance*.035)))}));
-
-    const currentDir=camera.position.clone().sub(target);
-    currentDir.y=0;
-    if(currentDir.lengthSq()<.001)currentDir.set(1,0,1);
-    currentDir.normalize();
-
-    const sceneOut=target.clone().sub(sceneCenter);
-    sceneOut.y=0;
-    if(sceneOut.lengthSq()<.001)sceneOut.copy(currentDir);
-    sceneOut.normalize();
-
-    // 12 azimuth candidates. We intentionally allow the camera to orbit far enough
-    // to find a clean line of sight instead of accepting a blocked 45° position.
-    const candidates=[];
-    for(let i=0;i<12;i++){
-      const a=(Math.PI*2*i)/12;
-      const dir=new THREE.Vector3(Math.cos(a),0,Math.sin(a));
-      const cam=target.clone()
-        .add(dir.clone().multiplyScalar(distance))
-        .add(new THREE.Vector3(0,Math.max(height*.34,distance*.20),0));
-
-      let blocked=0;
-      let inside=0;
-      for(const o of otherBoxes){
-        if(pointInsideBox(cam,o.box))inside+=1;
-        if(segmentIntersectsBox(cam,target,o.box))blocked+=1;
-      }
-
-      // Lower score is better:
-      //  - blocked view is heavily penalized
-      //  - being inside another building is essentially forbidden
-      //  - prefer a direction close to the current azimuth
-      //  - slight preference for the outside of the complex
-      const continuity=1-currentDir.dot(dir);
-      const outwardPenalty=(1-sceneOut.dot(dir))*.20;
-      const score=inside*10000+blocked*1000+continuity+outwardPenalty;
-      candidates.push({dir,cam,score,blocked,inside});
-    }
-
-    candidates.sort((a,b)=>a.score-b.score);
-    return candidates[0];
+  function smoothstep(t){
+    return t*t*(3-2*t);
   }
 
   useEffect(()=>{
-    const allReal=Object.entries(boundsMap)
+    const realBoxes=Object.entries(boundsMap)
       .filter(([id])=>!id.startsWith('__'))
-      .map(([,b])=>b);
-    const sceneBox=boundsMap.__scene || unionBounds(allReal);
+      .map(([,box])=>box);
+
+    const sceneBox=boundsMap.__scene || unionBounds(realBoxes);
     if(!sceneBox)return;
 
-    const sceneCenter=boxCenter(sceneBox);
-    let targetBox=sceneBox;
+    const sceneCenter=centerOf(sceneBox);
+    const sceneW=Math.max(.001,sceneBox.maxX-sceneBox.minX);
+    const sceneH=Math.max(.001,sceneBox.maxY-sceneBox.minY);
+    const sceneD=Math.max(.001,sceneBox.maxZ-sceneBox.minZ);
+    const sceneSpan=Math.max(sceneW,sceneD,sceneH,1);
+
+    let target;
+    let position;
+    let finalFov=40;
 
     if(selectedBuildingId){
-      targetBox=boundsMap[selectedBuildingId];
-      if(!targetBox)return;
-    }
+      const box=boundsMap[selectedBuildingId];
+      if(!box)return;
 
-    const center=boxCenter(targetBox);
-    const width=Math.max(.001,targetBox.maxX-targetBox.minX);
-    const height=Math.max(.001,targetBox.maxY-targetBox.minY);
-    const depth=Math.max(.001,targetBox.maxZ-targetBox.minZ);
-    const span=Math.max(width,depth,height*.72,1);
+      const center=centerOf(box);
+      const w=Math.max(.001,box.maxX-box.minX);
+      const h=Math.max(.001,box.maxY-box.minY);
+      const d=Math.max(.001,box.maxZ-box.minZ);
+      const footprint=Math.max(w,d,1);
 
-    // Look slightly above the geometric center. This frames the façade more naturally
-    // and avoids the "camera aimed at the basement" feeling.
-    const target=new THREE.Vector3(
-      center.x,
-      // Keep the block centred in X/Z; aim slightly below mid-height so an elevated
-      // camera still shows façade + roof instead of looking flat at the building.
-      targetBox.minY + height*(selectedBuildingId ? .46 : .43),
-      center.z
-    );
+      // Same motion logic as the original /macheta/:
+      // target = selected building centre, camera = fixed elevated perspective offset.
+      target=new THREE.Vector3(
+        center.x,
+        box.minY+h*.46,
+        center.z
+      );
 
-    let dest;
-    let desiredFov=38;
-
-    if(preset==='top'){
-      const distance=Math.max(span*(selectedBuildingId?2.05:1.82),3.0);
-      dest=new THREE.Vector3(target.x,targetBox.maxY+distance,target.z+.001);
-      desiredFov=selectedBuildingId?34:39;
-      camera.up.set(0,0,-1);
-    }else if(preset==='front'){
-      const distance=Math.max(span*(selectedBuildingId?2.0:1.9),3.2);
-      dest=new THREE.Vector3(target.x,target.y+height*.06,target.z+distance);
-      desiredFov=selectedBuildingId?36:39;
-      camera.up.set(0,1,0);
-    }else{
-      camera.up.set(0,1,0);
-
-      if(selectedBuildingId){
-        // Clear-line perspective framing:
-        // keep the selected block centered, elevated and in perspective, but orbit
-        // around the complex until no other building is between camera and target.
-        const distance=Math.max(
-          Math.max(width,depth)*1.86,
-          height*1.08,
-          3.0
-        );
-
-        const chosen=chooseClearPerspectiveDirection(
-          target,
-          distance,
-          height,
-          selectedBuildingId
-        );
-
-        dest=chosen.cam;
-        desiredFov=36;
+      if(preset==='top'){
+        position=target.clone().add(new THREE.Vector3(0,Math.max(h*3.2,footprint*3.4,4.5),.001));
+        finalFov=36;
+        camera.up.set(0,0,-1);
+      }else if(preset==='front'){
+        position=target.clone().add(new THREE.Vector3(0,h*.18,Math.max(footprint*2.25,h*1.65,3.2)));
+        finalFov=37;
+        camera.up.set(0,1,0);
       }else{
-        const sceneSpan=Math.max(
-          sceneBox.maxX-sceneBox.minX,
-          sceneBox.maxZ-sceneBox.minZ,
-          sceneBox.maxY-sceneBox.minY,
-          1
-        );
+        camera.up.set(0,1,0);
 
-        // Tighter complex overview:
-        // the ensemble should fill the frame instead of floating far away.
-        const distance=sceneSpan*1.06+.55;
-        dest=new THREE.Vector3(
-          target.x+distance*.62,
-          target.y+distance*.27,
-          target.z+distance*.70
-        );
-        desiredFov=41.5;
+        // Reference uses left/right based on where the lot is in the ensemble.
+        // Keep that idea, but scale it from the actual GLB bounding box.
+        const sideSign=(center.x<sceneCenter.x)?1:-1;
+
+        // If the block is almost centered, preserve the side nearest to the current camera
+        // rather than flipping unpredictably.
+        let sx=sideSign;
+        if(Math.abs(center.x-sceneCenter.x)<sceneW*.08){
+          sx=camera.position.x>=target.x?1:-1;
+        }
+
+        const xOff=Math.max(footprint*1.65,h*1.15,2.4)*sx;
+        const yOff=Math.max(h*1.42,footprint*.92,2.2);
+        const zOff=Math.max(footprint*1.82,h*1.35,2.8);
+
+        position=target.clone().add(new THREE.Vector3(xOff,yOff,zOff));
+        finalFov=38;
+      }
+    }else{
+      // Whole ensemble: same elevated-perspective character as the reference,
+      // but normalized to the actual complex size.
+      target=new THREE.Vector3(
+        sceneCenter.x,
+        sceneBox.minY+sceneH*.18,
+        sceneCenter.z
+      );
+
+      if(preset==='top'){
+        position=target.clone().add(new THREE.Vector3(0,sceneSpan*1.55,.001));
+        finalFov=39;
+        camera.up.set(0,0,-1);
+      }else{
+        camera.up.set(0,1,0);
+        position=target.clone().add(new THREE.Vector3(
+          sceneSpan*.63,
+          sceneSpan*.68,
+          sceneSpan*.88
+        ));
+        finalFov=40;
       }
     }
 
-    const fromPos=camera.position.clone();
-    const fromTarget=controlsRef.current?.target.clone()||sceneCenter.clone();
-    const selectionChanged=previousSelection.current!==selectedBuildingId;
-    previousSelection.current=selectedBuildingId;
-
-    const isCinematic=cinematic && selectionChanged && preset==='perspective';
-    const duration=isCinematic
-      ? (selectedBuildingId ? 1.75 : 1.45)
-      : (cinematic ? .95 : .68);
-
-    let cp1,cp2;
-    if(isCinematic){
-      const travel=dest.clone().sub(fromPos);
-      const horizontal=new THREE.Vector3(travel.x,0,travel.z);
-      const side=horizontal.lengthSq()>.001
-        ? new THREE.Vector3(-horizontal.z,0,horizontal.x).normalize()
-        : new THREE.Vector3(1,0,0);
-
-      // A shallow arc + slight lift gives the camera a dolly/crane feel instead of
-      // a straight mathematical lerp.
-      const arc=Math.max(.45,Math.min(2.8,travel.length()*.20));
-      cp1=fromPos.clone()
-        .add(travel.clone().multiplyScalar(.24))
-        .add(side.clone().multiplyScalar(arc*.95))
-        .add(new THREE.Vector3(0,Math.max(arc*.72,.45),0));
-      cp2=fromPos.clone()
-        .add(travel.clone().multiplyScalar(.70))
-        .add(side.clone().multiplyScalar(arc*.30))
-        .add(new THREE.Vector3(0,Math.max(arc*.38,.25),0));
-    }else{
-      cp1=fromPos.clone().lerp(dest,.33);
-      cp2=fromPos.clone().lerp(dest,.72);
-    }
+    if(!position||!target)return;
 
     if(controlsRef.current)controlsRef.current.enabled=false;
 
-    anim.current={
+    tween.current={
+      from:camera.position.clone(),
+      to:position.clone(),
+      targetFrom:controlsRef.current?.target.clone()||target.clone(),
+      targetTo:target.clone(),
+      fovFrom:camera.fov,
+      fovTo:finalFov,
       elapsed:0,
-      duration,
-      fromPos,
-      cp1,
-      cp2,
-      toPos:dest,
-      fromTarget,
-      toTarget:target,
-      fromFov:camera.fov,
-      toFov:desiredFov
+      duration:cinematic?0.85:0.65
     };
   },[
     selectedBuildingId,preset,focusTick,JSON.stringify(boundsMap),
@@ -611,35 +494,37 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
   ]);
 
   useFrame((_,dt)=>{
-    const a=anim.current;
-    if(!a)return;
+    const tw=tween.current;
+    if(!tw)return;
 
-    a.elapsed=Math.min(a.duration,a.elapsed+dt);
-    const raw=a.duration>0?a.elapsed/a.duration:1;
-    const k=easeInOutQuint(raw);
+    tw.elapsed=Math.min(tw.duration,tw.elapsed+dt);
+    const t=tw.duration?tw.elapsed/tw.duration:1;
+    const e=smoothstep(t);
 
-    camera.position.copy(cubicBezier(a.fromPos,a.cp1,a.cp2,a.toPos,k));
+    camera.position.lerpVectors(tw.from,tw.to,e);
 
-    const target=a.fromTarget.clone().lerp(a.toTarget,k);
+    const target=tw.targetFrom.clone().lerp(tw.targetTo,e);
     if(controlsRef.current){
       controlsRef.current.target.copy(target);
     }
 
-    camera.fov=THREE.MathUtils.lerp(a.fromFov,a.toFov,k);
+    camera.fov=THREE.MathUtils.lerp(tw.fovFrom,tw.fovTo,e);
     camera.updateProjectionMatrix();
     camera.lookAt(target);
 
-    if(raw>=1){
+    if(t>=1){
+      camera.position.copy(tw.to);
+      camera.fov=tw.fovTo;
+      camera.updateProjectionMatrix();
+
       if(controlsRef.current){
-        controlsRef.current.target.copy(a.toTarget);
+        controlsRef.current.target.copy(tw.targetTo);
         controlsRef.current.enabled=true;
         controlsRef.current.update();
       }
-      camera.position.copy(a.toPos);
-      camera.fov=a.toFov;
-      camera.updateProjectionMatrix();
-      camera.lookAt(a.toTarget);
-      anim.current=null;
+
+      camera.lookAt(tw.targetTo);
+      tween.current=null;
     }
   });
 

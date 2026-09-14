@@ -1,3 +1,40 @@
+# Estate Studio — Build 03.7.16 Reference Camera Motion
+
+Camera din viewerul public a fost refăcută după logica din codul original `/macheta/` furnizat ca referință.
+
+## Principiu
+- ținta = centrul blocului selectat;
+- poziția camerei = target + offset de perspectivă ridicat;
+- stânga/dreapta se alege după poziția blocului în ansamblu;
+- nu mai există algoritmul experimental cu 12 unghiuri / line-of-sight;
+- tranziția folosește tween simplu `smoothstep` ca în referință;
+- durata pe public viewer este ~850 ms;
+- blocul selectat rămâne centrat;
+- perspectiva este ridicată, nu la nivelul fațadei;
+- restul blocurilor rămân în shade disabled;
+- vederea de ansamblu are propriul offset ridicat și mai apropiat.
+
+Include cumulativ 03.7.15 și toate fixurile anterioare.
+
+`/api/version` => `03.7.16-reference-camera-motion`
+
+# Estate Studio — Build 03.7.15 Scene Center Runtime Fix
+
+Fix critic peste 03.7.14.
+
+Cauza exactă a crash-ului:
+- `chooseClearPerspectiveDirection()` folosea `sceneCenter`;
+- `sceneCenter` era declarat doar în interiorul `useEffect`;
+- helper-ul era în afara acelui scope;
+- rezultatul în browser: `ReferenceError: sceneCenter is not defined`.
+
+Fix:
+- `sceneCenter` este transmis explicit ca argument helper-ului;
+- logica de cameră din 03.7.14 rămâne aceeași;
+- nicio schimbare în Supabase, DB sau schema proiectului.
+
+`/api/version` => `03.7.15-scene-center-runtime-fix`
+
 # Estate Studio — Build 03.7.14 Clear-Line Perspective Camera
 
 Corecție cameră pe bloc selectat:
