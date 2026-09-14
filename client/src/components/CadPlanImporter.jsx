@@ -158,7 +158,82 @@ function dedupeSegments(segments,max=14000){
   return out;
 }
 
-async function extractCadSegments(svgText){
+function clipSegmentToCrop(a,b,crop){
+  const xMin=crop.x,yMin=crop.y;
+  const xMax=crop.x+crop.w,yMax=crop.y+crop.h;
+  let t0=0,t1=1;
+  const dx=b.x-a.x,dy=b.y-a.y;
+
+  const tests=[
+    [-dx,a.x-xMin],
+    [ dx,xMax-a.x],
+    [-dy,a.y-yMin],
+    [ dy,yMax-a.y]
+  ];
+
+  for(const [p,q] of tests){
+    if(Math.abs(p)<1e-12){
+      if(q<0)return null;
+      continue;
+    }
+    const r=q/p;
+    if(p<0){
+      if(r>t1)return null;
+      if(r>t0)t0=r;
+    }else{
+      if(r<t0)return null;
+      if(r<t1)t1=r;
+    }
+  }
+
+  const p0={x:a.x+t0*dx,y:a.y+t0*dy};
+  const p1={x:a.x+t1*dx,y:a.y+t1*dy};
+  return [p0,p1];
+}
+
+function normalizeCrop(crop){
+  const x=Math.max(0,Math.min(.9999,Number(crop?.x)||0));
+  const y=Math.max(0,Math.min(.9999,Number(crop?.y)||0));
+  const w=Math.max(.002,Math.min(1-x,Number(crop?.w)||1));
+  const h=Math.max(.002,Math.min(1-y,Number(crop?.h)||1));
+  return {x,y,w,h};
+}
+
+function cropSvgDocument(svgText,crop){
+  const c=normalizeCrop(crop);
+  const parser=new DOMParser();
+  const doc=parser.parseFromString(svgText,'image/svg+xml');
+  const svg=doc.documentElement;
+  const vb=svgDimensions(svg);
+
+  const next={
+    x:vb.x+c.x*vb.width,
+    y:vb.y+c.y*vb.height,
+    width:c.w*vb.width,
+    height:c.h*vb.height
+  };
+
+  svg.setAttribute('viewBox',`${next.x} ${next.y} ${next.width} ${next.height}`);
+
+  // Keep browser/storage dimensions small integers. Real CAD coordinates stay in settings.
+  const previewWidth=2000;
+  const previewHeight=Math.max(1,Math.round(previewWidth*(next.height/next.width)));
+  svg.setAttribute('width',String(previewWidth));
+  svg.setAttribute('height',String(previewHeight));
+  svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+
+  return {
+    text:new XMLSerializer().serializeToString(svg),
+    originalViewBox:vb,
+    cropViewBox:next,
+    previewWidth,
+    previewHeight,
+    crop:c
+  };
+}
+
+
+async function extractCadSegments(svgText,crop={x:0,y:0,w:1,h:1}){
   const parser=new DOMParser();
   const doc=parser.parseFromString(svgText,'image/svg+xml');
   const svg=doc.documentElement;
@@ -197,13 +272,28 @@ async function extractCadSegments(svgText){
   const segments=[];
   let entityCount=0;
 
+  const activeCrop=normalizeCrop(crop);
+
   function push(a,b){
     if(!a||!b)return;
-    const ax=Math.max(-.1,Math.min(1.1,a.x));
-    const ay=Math.max(-.1,Math.min(1.1,a.y));
-    const bx=Math.max(-.1,Math.min(1.1,b.x));
-    const by=Math.max(-.1,Math.min(1.1,b.y));
-    segments.push([ax,ay,bx,by]);
+
+    const clipped=clipSegmentToCrop(a,b,activeCrop);
+    if(!clipped)return;
+
+    const [p0,p1]=clipped;
+
+    // Re-normalize selected CAD geometry to the cropped plan (0..1).
+    const ax=(p0.x-activeCrop.x)/activeCrop.w;
+    const ay=(p0.y-activeCrop.y)/activeCrop.h;
+    const bx=(p1.x-activeCrop.x)/activeCrop.w;
+    const by=(p1.y-activeCrop.y)/activeCrop.h;
+
+    segments.push([
+      Math.max(0,Math.min(1,ax)),
+      Math.max(0,Math.min(1,ay)),
+      Math.max(0,Math.min(1,bx)),
+      Math.max(0,Math.min(1,by))
+    ]);
   }
 
   const elements=[...liveSvg.querySelectorAll('line,polyline,polygon,rect,path,circle,ellipse')];
@@ -319,11 +409,25 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
   const [error,setError]=useState('');
   const [stats,setStats]=useState(null);
 
+  // Prepared DWG stays in browser until user chooses the actual floor plan from the sheet.
+  const [prepared,setPrepared]=useState(null);
+  const [previewUrl,setPreviewUrl]=useState('');
+  const [crop,setCrop]=useState({x:0,y:0,w:1,h:1});
+  const [dragStart,setDragStart]=useState(null);
+
   const sourceName=useMemo(()=>floor?.settings?.cad?.source_file||null,[floor?.settings]);
 
-  async function importCad(){
+  function clearPreviewUrl(){
+    if(previewUrl){
+      try{URL.revokeObjectURL(previewUrl)}catch{}
+    }
+    setPreviewUrl('');
+  }
+
+  async function prepareCad(){
     if(!file)return;
     setBusy(true);setError('');setStats(null);
+    clearPreviewUrl();
 
     try{
       if(!/\.dwg$/i.test(file.name)){
@@ -332,13 +436,77 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
 
       const converted=await dwgToSvg(file,setStage);
 
-      setStage('Extrag linii și puncte pentru CAD Snap…');
-      const geometry=await extractCadSegments(converted.text);
+      const url=URL.createObjectURL(
+        new Blob([converted.text],{type:'image/svg+xml'})
+      );
+
+      setPrepared(converted);
+      setPreviewUrl(url);
+      setCrop({x:0,y:0,w:1,h:1});
+      setStage('DWG pregătit. Selectează din planșă etajul pe care vrei să-l folosești.');
+    }catch(e){
+      console.error(e);
+      setError(e.message||String(e));
+      setStage('');
+    }finally{
+      setBusy(false);
+    }
+  }
+
+  function pointerNorm(e){
+    const el=e.currentTarget;
+    const r=el.getBoundingClientRect();
+    return {
+      x:Math.max(0,Math.min(1,(e.clientX-r.left)/Math.max(1,r.width))),
+      y:Math.max(0,Math.min(1,(e.clientY-r.top)/Math.max(1,r.height)))
+    };
+  }
+
+  function cropStart(e){
+    if(!prepared||busy)return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    const p=pointerNorm(e);
+    setDragStart(p);
+    setCrop({x:p.x,y:p.y,w:.002,h:.002});
+  }
+
+  function cropMove(e){
+    if(!dragStart||!prepared||busy)return;
+    const p=pointerNorm(e);
+    const x=Math.min(dragStart.x,p.x);
+    const y=Math.min(dragStart.y,p.y);
+    const w=Math.max(.002,Math.abs(p.x-dragStart.x));
+    const h=Math.max(.002,Math.abs(p.y-dragStart.y));
+    setCrop(normalizeCrop({x,y,w,h}));
+  }
+
+  function cropEnd(e){
+    if(!dragStart)return;
+    try{e.currentTarget.releasePointerCapture?.(e.pointerId)}catch{}
+    setDragStart(null);
+  }
+
+  async function saveCadSelection(){
+    if(!file||!prepared)return;
+    setBusy(true);setError('');setStats(null);
+
+    try{
+      const selected=normalizeCrop(crop);
+      const cropped=cropSvgDocument(prepared.text,selected);
+
+      setStage('Extrag doar geometria CAD din zona selectată…');
+      const geometry=await extractCadSegments(prepared.text,selected);
 
       setStats({
         entities:geometry.entityCount,
         segments:geometry.segments.length
       });
+
+      if(!geometry.segments.length){
+        throw new Error(
+          'Selecția nu conține geometrie CAD utilizabilă pentru snap. Trage dreptunghiul exact peste planul etajului.'
+        );
+      }
 
       setStage('Salvez DWG-ul original…');
       const rawFd=new FormData();
@@ -350,10 +518,10 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
       rawFd.append('label',`${floor.name} · DWG sursă`);
       const raw=await api('/admin/upload/project-documents',{method:'POST',body:rawFd});
 
-      setStage('Salvez planul SVG…');
-      const svgName=file.name.replace(/\.dwg$/i,'.svg');
+      setStage('Salvez doar planul selectat ca SVG…');
+      const svgName=file.name.replace(/\.dwg$/i,'')+`-${floor.id}.svg`;
       const svgFile=new File(
-        [converted.text],
+        [cropped.text],
         svgName,
         {type:'image/svg+xml'}
       );
@@ -364,7 +532,7 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
       svgFd.append('building_id',building.id);
       svgFd.append('floor_id',floor.id);
       svgFd.append('asset_type','floor-plan-cad-svg');
-      svgFd.append('label',`${floor.name} · plan vectorial`);
+      svgFd.append('label',`${floor.name} · plan CAD decupat`);
       const preview=await api('/admin/upload/floor-plans',{method:'POST',body:svgFd});
 
       setStage('Configurez editorul de poligoane…');
@@ -372,18 +540,30 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
       const settings={
         ...(floor.settings||{}),
         cad:{
-          version:'04.0',
+          version:'04.0.2',
           source_file:file.name,
           source_bucket:raw.bucket,
           source_path:raw.path,
           svg_path:preview.path,
           svg_url:preview.url,
-          view_box:[
-            converted.viewBox.x,
-            converted.viewBox.y,
-            converted.viewBox.width,
-            converted.viewBox.height
+
+          // Full DWG world coordinates are preserved here, never forced into integer DB fields.
+          original_view_box:[
+            cropped.originalViewBox.x,
+            cropped.originalViewBox.y,
+            cropped.originalViewBox.width,
+            cropped.originalViewBox.height
           ],
+          crop_normalized:[
+            selected.x,selected.y,selected.w,selected.h
+          ],
+          crop_view_box:[
+            cropped.cropViewBox.x,
+            cropped.cropViewBox.y,
+            cropped.cropViewBox.width,
+            cropped.cropViewBox.height
+          ],
+
           entity_count:geometry.entityCount,
           segments:geometry.segments,
           segment_count:geometry.segments.length,
@@ -395,15 +575,18 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
         method:'PATCH',
         body:{
           plan_path:preview.url,
-          plan_width:converted.viewBox.width,
-          plan_height:converted.viewBox.height,
+
+          // IMPORTANT: Supabase columns are integers. Never put DWG world coordinates here.
+          plan_width:cropped.previewWidth,
+          plan_height:cropped.previewHeight,
           settings
         }
       });
 
-      setStage('DWG importat.');
+      setStage('Plan CAD salvat.');
       await onImported?.();
-      setTimeout(()=>onClose?.(),500);
+      clearPreviewUrl();
+      setTimeout(()=>onClose?.(),450);
     }catch(e){
       console.error(e);
       setError(e.message||String(e));
@@ -413,52 +596,116 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
     }
   }
 
+  function resetPrepared(){
+    clearPreviewUrl();
+    setPrepared(null);
+    setStats(null);
+    setStage('');
+    setError('');
+    setCrop({x:0,y:0,w:1,h:1});
+  }
+
+  const cropStyle={
+    left:`${crop.x*100}%`,
+    top:`${crop.y*100}%`,
+    width:`${crop.w*100}%`,
+    height:`${crop.h*100}%`
+  };
+
   return <div className="modal">
-    <div className="modal-card cad-import-modal">
+    <div className="modal-card cad-import-modal cad-crop-modal">
       <button className="x" onClick={onClose} disabled={busy}>×</button>
 
       <small className="kicker">CAD FLOOR WORKFLOW</small>
-      <h2>Importă plan DWG</h2>
-      <p>
-        DWG-ul este citit vectorial în browser, convertit în SVG pentru afișare și
-        păstrat ca geometrie CAD pentru snap-ul poligoanelor.
-      </p>
+      <h2>{prepared?'Selectează planul etajului':'Importă plan DWG'}</h2>
 
-      {sourceName&&<div className="cad-current">
-        <b>Plan CAD actual</b>
-        <span>{sourceName}</span>
-      </div>}
+      {!prepared&&<>
+        <p>
+          DWG-ul poate conține mai multe planuri pe aceeași planșă. Îl deschidem întâi complet,
+          apoi alegi cu mouse-ul exact planul etajului pe care vrei să-l folosești.
+        </p>
 
-      <label className="cad-drop">
-        <input
-          type="file"
-          accept=".dwg,application/acad,application/x-acad,application/autocad_dwg,image/vnd.dwg"
-          onChange={e=>setFile(e.target.files?.[0]||null)}
-        />
-        <b>{file?file.name:'Alege fișierul .DWG'}</b>
-        <span>{file?`${(file.size/1024/1024).toFixed(1)} MB`:'DWG 2D · plan tehnic de etaj'}</span>
-      </label>
+        {sourceName&&<div className="cad-current">
+          <b>Plan CAD actual</b>
+          <span>{sourceName}</span>
+        </div>}
 
-      <div className="cad-flow">
-        <span>DWG</span><i>→</i><span>SVG vectorial</span><i>→</i><span>CAD Snap</span><i>→</i><span>Poligoane</span>
-      </div>
+        <label className="cad-drop">
+          <input
+            type="file"
+            accept=".dwg,application/acad,application/x-acad,application/autocad_dwg,image/vnd.dwg"
+            onChange={e=>{
+              setFile(e.target.files?.[0]||null);
+              setError('');
+            }}
+          />
+          <b>{file?file.name:'Alege fișierul .DWG'}</b>
+          <span>{file?`${(file.size/1024/1024).toFixed(1)} MB`:'DWG 2D · poate conține mai multe planuri'}</span>
+        </label>
+
+        <div className="cad-flow">
+          <span>DWG complet</span><i>→</i><span>Selectezi etajul</span><i>→</i><span>SVG decupat</span><i>→</i><span>CAD Snap</span>
+        </div>
+      </>}
+
+      {prepared&&<>
+        <p className="cad-crop-help">
+          Trage un dreptunghi <b>doar peste planul etajului dorit</b>. Restul planșei nu va intra
+          în editor și nici în geometria de snap.
+        </p>
+
+        <div
+          className="cad-sheet-preview"
+          onPointerDown={cropStart}
+          onPointerMove={cropMove}
+          onPointerUp={cropEnd}
+          onPointerCancel={cropEnd}
+        >
+          <img src={previewUrl} alt="Previzualizare DWG complet"/>
+          <div className="cad-crop-rect" style={cropStyle}>
+            <span>PLAN SELECTAT</span>
+          </div>
+        </div>
+
+        <div className="cad-selection-info">
+          <span>X {Math.round(crop.x*100)}%</span>
+          <span>Y {Math.round(crop.y*100)}%</span>
+          <span>W {Math.round(crop.w*100)}%</span>
+          <span>H {Math.round(crop.h*100)}%</span>
+          <button onClick={()=>setCrop({x:0,y:0,w:1,h:1})} disabled={busy}>Toată planșa</button>
+        </div>
+
+        <div className="cad-important">
+          DWG-ul original rămâne salvat integral. Pentru etaj folosim numai selecția de mai sus.
+        </div>
+      </>}
 
       {stage&&<div className="info-box">{stage}</div>}
       {stats&&<div className="success-box">
-        {stats.entities} entități SVG · {stats.segments} segmente disponibile pentru snap
+        {stats.entities.toLocaleString('ro-RO')} entități SVG în sursă · {stats.segments.toLocaleString('ro-RO')} segmente CAD în selecție
       </div>}
       {error&&<div className="error-box">{error}</div>}
 
       <div className="modal-actions">
-        <button onClick={onClose} disabled={busy}>Renunță</button>
-        <button className="primary" onClick={importCad} disabled={!file||busy}>
-          {busy?'Procesez DWG…':'Importă și pregătește planul'}
-        </button>
+        {prepared
+          ? <>
+              <button onClick={resetPrepared} disabled={busy}>← Alt DWG</button>
+              <button className="primary" onClick={saveCadSelection} disabled={busy||crop.w<.002||crop.h<.002}>
+                {busy?'Salvez planul…':'Folosește această selecție'}
+              </button>
+            </>
+          : <>
+              <button onClick={onClose} disabled={busy}>Renunță</button>
+              <button className="primary" onClick={prepareCad} disabled={!file||busy}>
+                {busy?'Deschid DWG-ul…':'Deschide DWG-ul'}
+              </button>
+            </>
+        }
       </div>
 
       <small className="cad-license-note">
-        Importul DWG folosește LibreDWG WebAssembly. Fișierul original este păstrat separat,
-        iar în viewer folosim SVG-ul generat.
+        Coordonatele CAD reale pot avea valori foarte mari și zecimale. Ele sunt păstrate în metadata CAD;
+        câmpurile de preview din baza de date primesc doar dimensiuni normalizate întregi.
       </small>
     </div>
   </div>;

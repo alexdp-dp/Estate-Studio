@@ -1,3 +1,36 @@
+# Estate Studio — Build 04.0.2 DWG Plan Crop
+
+Fix pentru DWG-uri foarte mari care conțin mai multe planuri pe aceeași planșă.
+
+## Problema rezolvată
+Exemplu real:
+- 170.576 entități SVG;
+- coordonate CAD de milioane, ex. `5317834.5`;
+- mai multe planuri în același DWG.
+
+`plan_width` / `plan_height` sunt coloane INTEGER, deci coordonatele CAD reale nu trebuie salvate acolo.
+
+## Noul workflow
+1. `Importă DWG`.
+2. Estate Studio convertește DWG-ul în SVG, dar NU îl salvează imediat ca plan.
+3. Se deschide planșa completă.
+4. Tragi un dreptunghi doar peste planul etajului dorit.
+5. Estate Studio:
+   - schimbă viewBox-ul SVG la selecția ta;
+   - extrage numai segmentele CAD care intersectează selecția;
+   - re-normalizează acele segmente la 0..1;
+   - salvează SVG-ul decupat ca `floor.plan_path`;
+   - păstrează DWG-ul original integral separat.
+6. Editorul lucrează numai cu etajul selectat.
+
+## Fix integer
+- coordonatele CAD reale rămân în `floor.settings.cad.original_view_box` / `crop_view_box`;
+- `plan_width` este normalizat la 2000;
+- `plan_height` este calculat proporțional și rotunjit la integer;
+- valoarea CAD `5317834.5` nu mai ajunge niciodată într-o coloană INTEGER.
+
+`/api/version` => `04.0.2-dwg-plan-crop`
+
 # Estate Studio — Build 04.0.1 DWG SVG Parser Fix
 
 Hotfix pentru eroarea:
