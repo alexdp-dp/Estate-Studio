@@ -1,3 +1,12 @@
+# Estate Studio — Build 03.1 Hotfix
+
+Hotfix pentru ecranul alb:
+- routing admin scos din contextul descendent `/admin/*`
+- Error Boundary global: dacă există o eroare JS, este afișată pe ecran, nu mai rămâne pagină albă
+- Three.js/Konva sunt lazy-loaded și nu mai pot bloca login-ul sau lista de proiecte la import
+- erorile API din Projects sunt afișate
+- `/api/version` confirmă versiunea deployată (`03.1-hotfix`)
+
 # Estate Studio — Build 03 Complete
 
 ## Deploy direct pe GitHub + Render
