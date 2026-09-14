@@ -1,3 +1,28 @@
+# Estate Studio — Build 04.0.1 DWG SVG Parser Fix
+
+Hotfix pentru eroarea:
+`SVG-ul generat din DWG nu a putut fi citit`.
+
+## Cauza probabilă
+LibreDWG poate genera SVG corect geometric, dar unele DWG-uri conțin texte CAD / bytes de control / `&` ne-escape-uit care fac SVG-ul invalid pentru parserul XML strict al browserului.
+
+## Fix
+- acceptă output LibreDWG string sau typed array;
+- elimină BOM și control characters invalide XML;
+- izolează documentul real dintre `<svg>...</svg>`;
+- escape-uiește ampersand-uri CAD nevalide;
+- încearcă întâi parser XML strict;
+- dacă acesta eșuează, folosește parser HTML tolerant ca recovery;
+- serializează din nou într-un SVG XML curat;
+- validează încă o dată înainte de upload;
+- elimină `script` / `foreignObject`;
+- mesajele de eroare includ acum detaliul real de parsing dacă repararea nu reușește.
+
+Nu schimbă workflow-ul:
+DWG → SVG vectorial → CAD Snap → poligoane.
+
+`/api/version` => `04.0.1-dwg-svg-parser-fix`
+
 # Estate Studio — Build 04.0.0 DWG CAD Polygons
 
 Detectorul automat de apartamente a fost ELIMINAT complet.

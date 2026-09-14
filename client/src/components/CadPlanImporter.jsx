@@ -24,13 +24,79 @@ function svgDimensions(svg){
   return {x:0,y:0,width,height};
 }
 
-function normalizeSvg(svgString){
-  const parser=new DOMParser();
-  const doc=parser.parseFromString(svgString,'image/svg+xml');
-  const parseError=doc.querySelector('parsererror');
-  if(parseError)throw new Error('SVG-ul generat din DWG nu a putut fi citit.');
+function normalizeSvg(svgInput){
+  // LibreDWG normally returns a string, but depending on the wrapper/browser build
+  // it can also surface a typed array. Normalize that first.
+  let raw=typeof svgInput==='string'
+    ? svgInput
+    : svgInput instanceof Uint8Array
+      ? new TextDecoder('utf-8').decode(svgInput)
+      : svgInput?.buffer instanceof ArrayBuffer
+        ? new TextDecoder('utf-8').decode(new Uint8Array(svgInput.buffer))
+        : String(svgInput??'');
 
-  const svg=doc.documentElement;
+  // Some real-world DWGs contain text/control bytes that make an otherwise usable
+  // SVG fail strict XML parsing. Keep only the SVG document and sanitize characters
+  // that XML 1.0 cannot represent.
+  raw=raw
+    .replace(/^\uFEFF/,'')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'');
+
+  const start=raw.search(/<svg\b/i);
+  const closeMatches=[...raw.matchAll(/<\/svg\s*>/ig)];
+  const end=closeMatches.length
+    ? closeMatches[closeMatches.length-1].index + closeMatches[closeMatches.length-1][0].length
+    : -1;
+
+  if(start<0){
+    throw new Error('LibreDWG a citit fișierul, dar nu a produs niciun element <svg>.');
+  }
+
+  if(end>start)raw=raw.slice(start,end);
+  else raw=raw.slice(start);
+
+  // Bare ampersands are common in CAD text like "A&B" and invalidate XML.
+  raw=raw.replace(
+    /&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);)/gi,
+    '&amp;'
+  );
+
+  const parser=new DOMParser();
+  let doc=parser.parseFromString(raw,'image/svg+xml');
+  let svg=doc.documentElement;
+  let parseError=doc.querySelector('parsererror');
+
+  if(parseError || svg?.tagName?.toLowerCase()!=='svg'){
+    // Fallback: the HTML parser is deliberately tolerant of malformed CAD text/
+    // attributes. Once the SVG DOM exists, serialize it back to clean XML.
+    const htmlDoc=parser.parseFromString(
+      `<!doctype html><html><body>${raw}</body></html>`,
+      'text/html'
+    );
+    const tolerantSvg=htmlDoc.querySelector('svg');
+
+    if(!tolerantSvg){
+      const detail=(parseError?.textContent||'').replace(/\s+/g,' ').trim().slice(0,180);
+      throw new Error(
+        `SVG-ul LibreDWG este invalid și nu a putut fi reparat${detail?`: ${detail}`:''}.`
+      );
+    }
+
+    const cleanDoc=document.implementation.createDocument(
+      'http://www.w3.org/2000/svg',
+      'svg',
+      null
+    );
+    const imported=cleanDoc.importNode(tolerantSvg,true);
+    cleanDoc.replaceChild(imported,cleanDoc.documentElement);
+
+    doc=cleanDoc;
+    svg=doc.documentElement;
+  }
+
+  // Remove executable/foreign content. We only need vector drawing geometry.
+  svg.querySelectorAll('script,foreignObject').forEach(el=>el.remove());
+
   const vb=svgDimensions(svg);
 
   svg.setAttribute('xmlns','http://www.w3.org/2000/svg');
@@ -48,10 +114,22 @@ function normalizeSvg(svgString){
   bg.setAttribute('data-estate-studio-background','1');
   svg.insertBefore(bg,svg.firstChild);
 
+  const serialized=new XMLSerializer().serializeToString(svg);
+
+  // Final validation after the tolerant repair path. If this parses, the SVG is safe
+  // to upload and to feed to the segment extractor.
+  const verify=parser.parseFromString(serialized,'image/svg+xml');
+  const verifyError=verify.querySelector('parsererror');
+
+  if(verifyError){
+    const detail=(verifyError.textContent||'').replace(/\s+/g,' ').trim().slice(0,180);
+    throw new Error(`SVG-ul reparat nu este XML valid${detail?`: ${detail}`:''}.`);
+  }
+
   return {
-    svg,
+    svg:verify.documentElement,
     viewBox:vb,
-    text:new XMLSerializer().serializeToString(svg)
+    text:serialized
   };
 }
 
@@ -220,12 +298,13 @@ async function dwgToSvg(file,onStage){
     const db=instance.convert(ptr);
     onStage?.('Generez planul vectorial SVG…');
 
-    const svgString=instance.dwg_to_svg(db);
-    if(!svgString||!svgString.includes('<svg')){
-      throw new Error('DWG-ul nu a produs un plan SVG valid.');
+    const svgOutput=instance.dwg_to_svg(db);
+    if(svgOutput==null){
+      throw new Error('DWG-ul a fost citit, dar LibreDWG nu a returnat conținut SVG.');
     }
 
-    return normalizeSvg(svgString);
+    onStage?.('Curăț și normalizez SVG-ul generat…');
+    return normalizeSvg(svgOutput);
   }finally{
     if(ptr){
       try{instance.dwg_free(ptr)}catch{}
