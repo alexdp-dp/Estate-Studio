@@ -309,3 +309,18 @@ a.primary:hover,
   background:rgba(7,144,74,.09);
   box-shadow:inset 3px 0 0 #07904a;
 }
+
+/* 03.8.1 — AP label guided detection */
+.ap-seed-link{
+  stroke:#111;
+  stroke-width:2;
+  stroke-dasharray:7 6;
+  opacity:.55;
+  vector-effect:non-scaling-stroke;
+}
+.ap-label-dot{
+  fill:#fff;
+  stroke:#111;
+  stroke-width:3;
+  vector-effect:non-scaling-stroke;
+}

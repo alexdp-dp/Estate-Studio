@@ -616,6 +616,325 @@ async function loadPlan(url,maxDim=1400){
   return {imageData:ctx.getImageData(0,0,w,h),w,h};
 }
 
+
+function imageDataCanvas(imageData,w,h){
+  const canvas=document.createElement('canvas');
+  canvas.width=w;canvas.height=h;
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});
+  ctx.putImageData(imageData,0,0);
+  return canvas;
+}
+
+function parseApNumber(text){
+  const compact=String(text||'')
+    .toUpperCase()
+    .replace(/\s+/g,'')
+    .replace(/[^A-Z0-9]/g,'');
+  const m=compact.match(/^AP(\d{1,2})$/);
+  return m?Number(m[1]):null;
+}
+
+function mergeApWords(words){
+  const clean=(words||[])
+    .filter(w=>w?.text&&w?.bbox)
+    .map(w=>({...w,text:String(w.text).trim()}));
+
+  const hits=[];
+
+  for(let i=0;i<clean.length;i++){
+    const w=clean[i];
+    let n=parseApNumber(w.text);
+    let bbox=w.bbox;
+    let raw=w.text;
+
+    if(n==null){
+      const head=w.text.toUpperCase().replace(/[^A-Z]/g,'');
+      if(head==='AP'){
+        const cy=(w.bbox.y0+w.bbox.y1)/2;
+        for(let j=i+1;j<Math.min(clean.length,i+5);j++){
+          const q=clean[j];
+          const qCy=(q.bbox.y0+q.bbox.y1)/2;
+          const digits=String(q.text).replace(/\D/g,'');
+          const horizontalGap=q.bbox.x0-w.bbox.x1;
+          const sameLine=Math.abs(qCy-cy)<=Math.max(14,(w.bbox.y1-w.bbox.y0)*.9);
+          if(sameLine&&horizontalGap>-8&&horizontalGap<90&&/^\d{1,2}$/.test(digits)){
+            n=Number(digits);
+            bbox={
+              x0:Math.min(w.bbox.x0,q.bbox.x0),
+              y0:Math.min(w.bbox.y0,q.bbox.y0),
+              x1:Math.max(w.bbox.x1,q.bbox.x1),
+              y1:Math.max(w.bbox.y1,q.bbox.y1)
+            };
+            raw=`${w.text}${q.text}`;
+            break;
+          }
+        }
+      }
+    }
+
+    if(n==null||n<1||n>99)continue;
+
+    hits.push({
+      number:n,
+      code:`AP.${String(n).padStart(2,'0')}`,
+      raw,
+      bbox
+    });
+  }
+
+  // Deduplicate OCR echoes of the same label.
+  const byNumber=new Map();
+  for(const h of hits){
+    const prev=byNumber.get(h.number);
+    if(!prev)byNumber.set(h.number,h);
+    else{
+      const area=(h.bbox.x1-h.bbox.x0)*(h.bbox.y1-h.bbox.y0);
+      const prevArea=(prev.bbox.x1-prev.bbox.x0)*(prev.bbox.y1-prev.bbox.y0);
+      if(area>prevArea)byNumber.set(h.number,h);
+    }
+  }
+  return [...byNumber.values()].sort((a,b)=>a.number-b.number);
+}
+
+async function recognizeApartmentLabels(raw,onProgress){
+  const {createWorker}=await import('tesseract.js');
+  const worker=await createWorker('eng',1,{
+    logger:m=>{
+      if(m?.status==='recognizing text'&&Number.isFinite(m.progress)){
+        onProgress?.(Math.round(m.progress*100));
+      }
+    }
+  });
+
+  try{
+    await worker.setParameters({
+      tessedit_char_whitelist:'APap.0123456789',
+      preserve_interword_spaces:'1'
+    });
+    const canvas=imageDataCanvas(raw.imageData,raw.w,raw.h);
+    const {data}=await worker.recognize(canvas);
+    return mergeApWords(data?.words||[]);
+  }finally{
+    await worker.terminate();
+  }
+}
+
+function bboxDistance(x,y,b){
+  const dx=x<b.minX?b.minX-x:x>b.maxX?x-b.maxX:0;
+  const dy=y<b.minY?b.minY-y:y>b.maxY?y-b.maxY:0;
+  return Math.hypot(dx,dy);
+}
+
+function deriveSeedsFromApLabels(raw,labels,threshold=95){
+  const {imageData,w,h}=raw;
+  const d=imageData.data,N=w*h;
+  const opaque=new Uint8Array(N),dark=new Uint8Array(N);
+  let opaqueCount=0;
+
+  for(let i=0,p=0;i<N;i++,p+=4){
+    const a=d[p+3];
+    if(a>48){
+      opaque[i]=1;opaqueCount++;
+      const gray=.299*d[p]+.587*d[p+1]+.114*d[p+2];
+      if(gray<threshold)dark[i]=1;
+    }
+  }
+
+  const wall=buildStructuralWallMask(dark,w,h);
+  const free=new Uint8Array(N);
+  for(let i=0;i<N;i++)free[i]=opaque[i]&&!wall[i]?1:0;
+
+  const cc=components(free,w,h,true);
+  const statById=new Map(cc.stats.map(v=>[v.id,v]));
+  const used=new Set();
+  const seeds=[];
+
+  const minUseful=Math.max(35,opaqueCount*.00045);
+  const maxUseful=opaqueCount*.22;
+
+  for(const label of labels){
+    const lx=clamp((label.bbox.x0+label.bbox.x1)/2,0,w-1);
+    const ly=clamp((label.bbox.y0+label.bbox.y1)/2,0,h-1);
+    const ownId=cc.labels[Math.round(ly)*w+Math.round(lx)]||0;
+
+    const ranked=cc.stats
+      .filter(st=>{
+        if(st.touchesBorder||used.has(st.id))return false;
+        if(st.area<minUseful||st.area>maxUseful)return false;
+        return true;
+      })
+      .map(st=>{
+        const dist=bboxDistance(lx,ly,st);
+        const ownPenalty=st.id===ownId?22:0;
+        const tinyPenalty=st.area<opaqueCount*.0015?18:0;
+        const hugePenalty=st.area>opaqueCount*.10?24:0;
+        const centroid=Math.hypot(st.cx-lx,st.cy-ly);
+        return {st,score:dist+centroid*.08+ownPenalty+tinyPenalty+hugePenalty};
+      })
+      .sort((a,b)=>a.score-b.score);
+
+    const chosen=ranked[0]?.st;
+    if(!chosen)continue;
+
+    used.add(chosen.id);
+    seeds.push({
+      x:clamp(chosen.cx/w,0,1),
+      y:clamp(chosen.cy/h,0,1),
+      code:label.code,
+      number:label.number,
+      source:'ocr',
+      labelX:lx/w,
+      labelY:ly/h,
+      componentId:chosen.id
+    });
+  }
+
+  return seeds;
+}
+
+function attachCodesToDetections(result,seeds){
+  if(!result||!seeds?.length)return result;
+
+  const remaining=result.detections.map((d,i)=>({d,i}));
+  const assigned=new Map();
+
+  for(const seed of seeds){
+    if(!remaining.length)break;
+    let bestIdx=0,bestDist=Infinity;
+    for(let i=0;i<remaining.length;i++){
+      const item=remaining[i];
+      const dist=Math.hypot(item.d.cx-seed.x,item.d.cy-seed.y);
+      if(dist<bestDist){bestDist=dist;bestIdx=i}
+    }
+    const [{d,i}]=remaining.splice(bestIdx,1);
+    assigned.set(i,seed.code);
+  }
+
+  return {
+    ...result,
+    detections:result.detections.map((d,i)=>({...d,suggestedCode:assigned.get(i)||null})),
+    apSeeds:seeds,
+    source:'ap-labels'
+  };
+}
+
+function pointInPolygon(x,y,points){
+  let inside=false;
+  for(let i=0,j=points.length-1;i<points.length;j=i++){
+    const xi=points[i].x,yi=points[i].y;
+    const xj=points[j].x,yj=points[j].y;
+    const crosses=((yi>y)!==(yj>y)) &&
+      (x < (xj-xi)*(y-yi)/((yj-yi)||1e-9)+xi);
+    if(crosses)inside=!inside;
+  }
+  return inside;
+}
+
+function detectionContainsSeed(d,seed){
+  if(!d?.points?.length)return false;
+  return pointInPolygon(seed.x,seed.y,d.points);
+}
+
+function detectionsOverlapEnough(a,b){
+  if(!a||!b)return false;
+
+  // Centroid closeness is enough for our hybrid merge because both detections
+  // come from the same raster / wall mask and should describe the same unit.
+  const cDist=Math.hypot(a.cx-b.cx,a.cy-b.cy);
+  if(cDist<.035)return true;
+
+  // If either centroid sits inside the other polygon, they refer to the same unit.
+  if(a.points?.length&&pointInPolygon(b.cx,b.cy,a.points))return true;
+  if(b.points?.length&&pointInPolygon(a.cx,a.cy,b.points))return true;
+
+  return false;
+}
+
+function hybridMergeDetections(geometryResult,seededResult,seeds){
+  const geometry=(geometryResult?.detections||[]).map(d=>({...d}));
+  const seeded=(seededResult?.detections||[]).map(d=>({...d}));
+  const usedGeometry=new Set();
+  const final=[];
+
+  // First preserve every AP-labelled apartment that we could resolve.
+  for(const seed of seeds||[]){
+    let bestSeeded=null,bestSeededDist=Infinity;
+
+    for(const d of seeded){
+      if(detectionContainsSeed(d,seed)){
+        bestSeeded=d;
+        bestSeededDist=0;
+        break;
+      }
+      const dist=Math.hypot(d.cx-seed.x,d.cy-seed.y);
+      if(dist<bestSeededDist){
+        bestSeededDist=dist;
+        bestSeeded=d;
+      }
+    }
+
+    // Prefer a geometry detection if it already contains this AP seed because
+    // its full-set segmentation is more consistent with the unlabeled units.
+    let bestGeometryIndex=-1,bestGeometryDist=Infinity;
+    for(let i=0;i<geometry.length;i++){
+      if(usedGeometry.has(i))continue;
+      const d=geometry[i];
+      if(detectionContainsSeed(d,seed)){
+        bestGeometryIndex=i;
+        bestGeometryDist=0;
+        break;
+      }
+      const dist=Math.hypot(d.cx-seed.x,d.cy-seed.y);
+      if(dist<bestGeometryDist){
+        bestGeometryDist=dist;
+        bestGeometryIndex=i;
+      }
+    }
+
+    let chosen=null;
+    if(bestGeometryIndex>=0 && bestGeometryDist<=.12){
+      chosen={...geometry[bestGeometryIndex]};
+      usedGeometry.add(bestGeometryIndex);
+    }else if(bestSeeded && bestSeededDist<=.15){
+      chosen={...bestSeeded};
+    }
+
+    if(chosen){
+      final.push({
+        ...chosen,
+        suggestedCode:seed.code,
+        sourceHint:'ap-label'
+      });
+    }
+  }
+
+  // Then keep every geometrically detected apartment that wasn't already
+  // consumed by an AP-labelled unit. This is the critical part: AP labels are
+  // OPTIONAL HINTS, never the source of truth for apartment count.
+  for(let i=0;i<geometry.length;i++){
+    if(usedGeometry.has(i))continue;
+    const candidate=geometry[i];
+    const duplicate=final.some(existing=>detectionsOverlapEnough(existing,candidate));
+    if(!duplicate){
+      final.push({...candidate,sourceHint:'geometry'});
+    }
+  }
+
+  final.sort((a,b)=>{
+    const rowA=Math.round(a.cy*8),rowB=Math.round(b.cy*8);
+    return rowA===rowB?a.cx-b.cx:a.cy-b.cy;
+  });
+
+  return {
+    ...geometryResult,
+    detections:final,
+    apSeeds:seeds||[],
+    source:(seeds&&seeds.length)?'hybrid':'geometry',
+    labelledCount:(seeds||[]).length,
+    geometryCount:geometry.length
+  };
+}
+
 const colors=[
   '#22b573','#4f7cff','#f28d63','#9b6ad6','#e4b743','#00a7b5','#e66f9d','#7eb54b',
   '#d66d3a','#607dcb','#7f62a3','#57a86b','#ca6f8a','#b3a33c','#3f94b8','#d58043'
@@ -627,6 +946,10 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
   const [autoThreshold,setAutoThreshold]=useState(true);
   const [guided,setGuided]=useState(false);
   const [seeds,setSeeds]=useState([]);
+  const [labelMode,setLabelMode]=useState(true);
+  const [apLabels,setApLabels]=useState([]);
+  const [autoSeeds,setAutoSeeds]=useState([]);
+  const [ocrProgress,setOcrProgress]=useState(0);
   const [aspect,setAspect]=useState(1);
   const [busy,setBusy]=useState(false);
   const [raw,setRaw]=useState(null);
@@ -657,31 +980,158 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
   async function run(){
     if(!floor?.plan_path)return;
     setBusy(true);setMessage('');
+    setOcrProgress(0);
+
     try{
       const loaded=raw||await loadPlan(floor.plan_path);
       if(!raw)setRaw(loaded);
-      const r=autoThreshold
-        ? analyzeAuto(loaded.imageData,loaded.w,loaded.h,expected,new Set(),guided?seeds:[])
-        : analyzePixels(loaded.imageData,loaded.w,loaded.h,Number(threshold)||95,expected,new Set(),guided?seeds:[]);
+
+      let labels=[];
+      let labelSeeds=[];
+
+      if(!guided&&labelMode){
+        try{
+          setMessage('Citesc eventualele etichete AP.xx…');
+          labels=await recognizeApartmentLabels(
+            {...loaded,imageData:loaded.imageData},
+            p=>setOcrProgress(p)
+          );
+          setApLabels(labels);
+
+          if(labels.length){
+            labelSeeds=deriveSeedsFromApLabels(
+              {...loaded,imageData:loaded.imageData},
+              labels,
+              Number(threshold)||95
+            );
+          }
+
+          setAutoSeeds(labelSeeds);
+        }catch(ocrError){
+          // AP labels are purely optional hints.
+          console.warn('AP label OCR unavailable:',ocrError);
+          setApLabels([]);
+          setAutoSeeds([]);
+          labelSeeds=[];
+        }
+      }else if(guided){
+        setAutoSeeds([]);
+        setApLabels([]);
+      }
+
+      setMessage('');
+
+      if(guided){
+        // Manual assisted mode: user's clicks are authoritative seeds.
+        let r=autoThreshold
+          ? analyzeAuto(loaded.imageData,loaded.w,loaded.h,seeds.length,new Set(),seeds)
+          : analyzePixels(loaded.imageData,loaded.w,loaded.h,Number(threshold)||95,seeds.length,new Set(),seeds);
+
+        r={...r,source:'manual-seeds'};
+        setExcluded(new Set());
+        setResult(r);
+        if(r?.threshold)setThreshold(r.threshold);
+
+        const m={};
+        r.detections.forEach((d,i)=>{m[i]=existing[i]?.id||'new'});
+        setMapping(m);
+        return;
+      }
+
+      // PASS 1 — always detect the whole floor geometrically.
+      // Apartment count stays dynamic unless the user explicitly enters an expected count.
+      const geometryResult=autoThreshold
+        ? analyzeAuto(loaded.imageData,loaded.w,loaded.h,expected,new Set(),[])
+        : analyzePixels(loaded.imageData,loaded.w,loaded.h,Number(threshold)||95,expected,new Set(),[]);
+
+      let r=geometryResult;
+
+      // PASS 2 — if some AP.xx labels exist, use them only to strengthen / name
+      // those specific units. Missing AP labels do NOT remove any geometry detections.
+      if(labelSeeds.length){
+        const seededResult=autoThreshold
+          ? analyzeAuto(loaded.imageData,loaded.w,loaded.h,labelSeeds.length,new Set(),labelSeeds)
+          : analyzePixels(loaded.imageData,loaded.w,loaded.h,Number(threshold)||95,labelSeeds.length,new Set(),labelSeeds);
+
+        r=hybridMergeDetections(geometryResult,seededResult,labelSeeds);
+      }else{
+        r={...geometryResult,source:'geometry',apSeeds:[],labelledCount:0};
+      }
+
       setExcluded(new Set());
       setResult(r);
       if(r?.threshold)setThreshold(r.threshold);
+
       const m={};
-      r.detections.forEach((d,i)=>{m[i]=existing[i]?.id||'new'});
+      r.detections.forEach((d,i)=>{
+        const code=(d.suggestedCode||'').toUpperCase();
+        const matched=code
+          ? existing.find(a=>String(a.code||'').toUpperCase()===code)
+          : null;
+        m[i]=matched?.id||existing[i]?.id||'new';
+      });
       setMapping(m);
+
+      if(labelMode&&labels.length){
+        const resolved=labelSeeds.length;
+        setMessage(
+          `Am găsit ${labels.length} etichete AP.xx și am folosit ${resolved} ca indicii. `+
+          `Restul apartamentelor au rămas detectate geometric.`
+        );
+      }
     }catch(e){
       setMessage(`Eroare detectare: ${e.message}`);
-    }finally{setBusy(false)}
+    }finally{
+      setBusy(false);
+      setOcrProgress(0);
+    }
   }
 
   function recompute(nextExcluded){
     if(!raw)return;
-    const r=autoThreshold
-      ? analyzeAuto(raw.imageData,raw.w,raw.h,expected,nextExcluded,guided?seeds:[])
-      : analyzePixels(raw.imageData,raw.w,raw.h,Number(threshold)||95,expected,nextExcluded,guided?seeds:[]);
-    setExcluded(nextExcluded);setResult(r);
+
+    if(guided){
+      let r=autoThreshold
+        ? analyzeAuto(raw.imageData,raw.w,raw.h,seeds.length,nextExcluded,seeds)
+        : analyzePixels(raw.imageData,raw.w,raw.h,Number(threshold)||95,seeds.length,nextExcluded,seeds);
+
+      r={...r,source:'manual-seeds'};
+      setExcluded(nextExcluded);
+      setResult(r);
+
+      const m={};
+      r.detections.forEach((d,i)=>{m[i]=existing[i]?.id||'new'});
+      setMapping(m);
+      return;
+    }
+
+    const geometryResult=autoThreshold
+      ? analyzeAuto(raw.imageData,raw.w,raw.h,expected,nextExcluded,[])
+      : analyzePixels(raw.imageData,raw.w,raw.h,Number(threshold)||95,expected,nextExcluded,[]);
+
+    let r=geometryResult;
+
+    if(autoSeeds.length){
+      const seededResult=autoThreshold
+        ? analyzeAuto(raw.imageData,raw.w,raw.h,autoSeeds.length,nextExcluded,autoSeeds)
+        : analyzePixels(raw.imageData,raw.w,raw.h,Number(threshold)||95,autoSeeds.length,nextExcluded,autoSeeds);
+
+      r=hybridMergeDetections(geometryResult,seededResult,autoSeeds);
+    }else{
+      r={...geometryResult,source:'geometry',apSeeds:[],labelledCount:0};
+    }
+
+    setExcluded(nextExcluded);
+    setResult(r);
+
     const m={};
-    r.detections.forEach((d,i)=>{m[i]=existing[i]?.id||'new'});
+    r.detections.forEach((d,i)=>{
+      const code=(d.suggestedCode||'').toUpperCase();
+      const matched=code
+        ? existing.find(a=>String(a.code||'').toUpperCase()===code)
+        : null;
+      m[i]=matched?.id||existing[i]?.id||'new';
+    });
     setMapping(m);
   }
 
@@ -720,7 +1170,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
           points:d.points,
           confidence:d.confidence,
           target_apartment_id:mapping[i]==='new'?null:mapping[i],
-          suggested_code:`A${String(i+1).padStart(2,'0')}`
+          suggested_code:d.suggestedCode||`A${String(i+1).padStart(2,'0')}`
         }))
       };
       const saved=await api(`/admin/floors/${floor.id}/auto-apartments`,{method:'POST',body:payload});
@@ -739,7 +1189,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     <div className="modal-card auto-detector-card">
       <button className="x" onClick={onClose}>×</button>
       <div className="auto-head">
-        <div><small>AUTO-DETECT · ARCHITECTURAL V2</small><h2>Detectează apartamentele</h2><p>Detectorul reconstruiește pereții ca geometrie arhitecturală, ignoră mare parte din mobilier și produce contururi din segmente drepte, cu limite comune pe axa mediană a pereților.</p></div>
+        <div><small>AUTO-DETECT · HYBRID ARCHITECTURAL V4</small><h2>Detectează apartamentele</h2><p>Numărul de apartamente este dinamic. Etichetele AP.xx sunt doar indicii opționale: dacă există le folosim, iar apartamentele fără etichetă sunt detectate geometric.</p></div>
       </div>
 
       <div className="detector-settings detector-settings-v2">
@@ -754,6 +1204,16 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
           <input type="range" min="65" max="130" value={threshold} onChange={e=>setThreshold(e.target.value)}/>
           <small>{threshold}</small>
         </label>}
+        {!guided&&<label className="detector-check">
+          <input type="checkbox" checked={labelMode} onChange={e=>{
+            setLabelMode(e.target.checked);
+            setResult(null);
+            setApLabels([]);
+            setAutoSeeds([]);
+            setMessage('');
+          }}/>
+          Folosește AP.xx ca indicii, dacă există
+        </label>}
         <label className="detector-check">
           <input type="checkbox" checked={guided} onChange={e=>{
             const next=e.target.checked;
@@ -765,7 +1225,9 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
           }}/>
           Mod asistat
         </label>
-        {!guided&&<button className="primary" disabled={busy} onClick={run}>{busy?'Analizez…':'Analizează planul'}</button>}
+        {!guided&&<button className="primary" disabled={busy} onClick={run}>
+          {busy?(labelMode&&ocrProgress?`Citesc etichetele… ${ocrProgress}%`:'Analizez…'):'Analizează planul'}
+        </button>}
       </div>
 
       {guided&&<div className="guided-help">
@@ -804,7 +1266,11 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
 
       {!result&&!guided&&<div className="detector-intro">
         <b>Ce face detectorul</b>
-        <span>• caută întâi trasee lungi de perete, nu orice pixel întunecat;</span>
+        <span>• numărul de apartamente NU este legat de câte etichete AP.xx există;</span>
+        <span>• dacă există AP.01 / AP.02 / AP.03, le citește și le folosește doar pentru apartamentele respective;</span>
+        <span>• apartamentele fără AP.xx sunt detectate în paralel din pereți și regiuni;</span>
+        <span>• eticheta de pe hol NU devine seed direct: detectorul caută o regiune interioară apropiată de acces;</span>
+        <span>• caută apoi trasee lungi de perete, nu orice pixel întunecat;</span>
         <span>• mobilierul, textele și detaliile mici sunt filtrate înainte de segmentare;</span>
         <span>• golurile mici din pereți (uși / antialiasing) sunt reconectate controlat;</span>
         <span>• limitele dintre apartamente sunt împinse spre axa mediană a pereților comuni;</span>
@@ -817,7 +1283,15 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         <div className="detector-summary">
           <b>{result.detections.length} apartamente propuse</b>
           <span>{coreText}</span>
-          <small>Architectural V2 · {result.width}×{result.height}px analiză · prag {result.threshold}{guided?` · ${seeds.length} puncte-ghid`:''}</small>
+          <small>
+            {result.source==='hybrid'
+              ? `Hybrid V4 · ${result.labelledCount||0} cu AP.xx + ${Math.max(0,result.detections.length-(result.labelledCount||0))} fără etichetă`
+              : result.source==='manual-seeds'
+                ? `Mod asistat · ${seeds.length} puncte-ghid`
+                : `Geometric V4 · ${result.detections.length} apartamente propuse`
+            }
+            {' · '}prag {result.threshold}
+          </small>
           <small>Poți marca o propunere drept „zonă comună” și detectorul recalculează limitele.</small>
         </div>
 
@@ -834,13 +1308,19 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
               style={{fill:colors[i%colors.length]+'66',stroke:colors[i%colors.length]}}
             />)}
             {seeds.map((p,i)=><g key={'seed'+i}><circle cx={p.x*1000} cy={p.y*1000} r="10" className="seed-dot"/><text x={p.x*1000+14} y={p.y*1000-14} className="seed-label">{i+1}</text></g>)}
+            {!guided&&autoSeeds.map((p,i)=><g key={'autoseed'+i}>
+              <line x1={p.labelX*1000} y1={p.labelY*1000} x2={p.x*1000} y2={p.y*1000} className="ap-seed-link"/>
+              <circle cx={p.labelX*1000} cy={p.labelY*1000} r="7" className="ap-label-dot"/>
+              <circle cx={p.x*1000} cy={p.y*1000} r="10" className="seed-dot"/>
+              <text x={p.x*1000+14} y={p.y*1000-14} className="seed-label">{p.code}</text>
+            </g>)}
           </svg>
         </div>
 
         <div className="detector-grid">
           {result.detections.map((d,i)=><div className="detected-unit" key={d.componentId}>
             <span className="detected-color" style={{background:colors[i%colors.length]}}/>
-            <div><b>Propunere {i+1}</b><small>confidence {Math.round(d.confidence*100)}% · {d.points.length} puncte</small></div>
+            <div><b>{d.suggestedCode||`Propunere ${i+1}`}</b><small>confidence {Math.round(d.confidence*100)}% · {d.points.length} puncte</small></div>
             <select value={mapping[i]||'new'} onChange={e=>setMapping(v=>({...v,[i]:e.target.value}))}>
               <option value="new">Creează apartament nou</option>
               {existing.map(a=><option key={a.id} value={a.id}>{a.code} · {statusLabel[a.status]}</option>)}

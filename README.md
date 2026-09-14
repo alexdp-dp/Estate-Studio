@@ -1,3 +1,48 @@
+# Estate Studio — Build 03.8.2 Hybrid AP Optional Detector
+
+Corecție importantă de logică: etichetele `AP.xx` NU definesc numărul de apartamente.
+
+## Cum funcționează acum
+- numărul de apartamente este dinamic;
+- `Număr așteptat` este doar un override opțional;
+- detectorul rulează ÎNTOTDEAUNA o detecție geometrică pentru întreg etajul;
+- dacă găsește `AP.01`, `AP.02` etc., face separat o detecție ghidată pentru acele apartamente;
+- rezultatele se combină:
+  - apartamentele cu etichetă primesc codul AP.xx;
+  - apartamentele fără nicio etichetă rămân în rezultat din detecția geometrică;
+- dacă nu există nicio etichetă AP.xx, funcționează 100% geometric;
+- dacă există doar 2 etichete într-un plan cu 8 apartamente, cele 2 sunt ghidate de AP.xx, iar celelalte 6 sunt păstrate din geometrie;
+- dacă OCR nu pornește sau nu găsește nimic, detectorul continuă normal.
+
+## Important
+AP.xx este acum un `hint`, nu `source of truth`.
+
+`/api/version` => `03.8.2-hybrid-ap-optional-detector`
+
+# Estate Studio — Build 03.8.1 AP Label Guided Detector
+
+Detector V3: folosește automat marcajele `AP.01`, `AP.02`, `AP.03` etc. atunci când acestea există pe plan.
+
+## Flux
+1. OCR citește marcajele AP.xx.
+2. Marcajul de pe hol NU este folosit direct ca interior al apartamentului.
+3. Pe baza wall-mask-ului, detectorul caută cea mai apropiată regiune interioară relevantă de marcaj.
+4. Acea regiune devine seed pentru apartamentul AP.xx.
+5. Detectorul Architectural V2 construiește poligonul pe pereți și împarte pereții comuni.
+6. Codurile AP.xx sunt păstrate în propuneri și la crearea apartamentelor noi.
+
+## Fallback
+- dacă OCR nu poate porni sau nu găsește AP.xx, detectorul revine automat la detecția geometrică;
+- Modul asistat manual rămâne disponibil;
+- OCR este lazy-loaded: nu intră în bundle-ul principal al Estate Studio.
+
+## UI
+- opțiune implicit activă: `Folosește automat etichetele AP.01 / AP.02…`;
+- overlay-ul arată marcajul OCR, legătura către seed-ul interior și codul AP.xx;
+- propunerile sunt afișate ca AP.01, AP.02 etc., nu doar `Propunere 1`.
+
+`/api/version` => `03.8.1-ap-label-guided-detector`
+
 # Estate Studio — Build 03.8.0 Architectural Detector V2
 
 Detectorul automat de apartamente a fost refăcut fără ML / training.
