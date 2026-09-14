@@ -116,7 +116,7 @@ export default function EmbedApp(){
 
     <aside className="macheta-nav">
       <small>PLAN GENERAL</small>
-      <h1>Alege blocul dorit.</h1>
+      <h1>O nouă perspectivă.</h1>
       <button className={!buildingId?'active':''} onClick={()=>selectBuilding(null)}><span>Toate clădirile</span><i>↗</i></button>
       {(project.buildings||[]).map((b,i)=><button key={b.id} className={buildingId===b.id?'active':''} onClick={()=>selectBuilding(b)}><span>{b.name}</span><em>{String(i+1).padStart(2,'0')}</em></button>)}
     </aside>

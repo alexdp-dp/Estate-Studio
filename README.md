@@ -1,36 +1,44 @@
-# Estate Studio — Build 03.9.0 Technical Topology Detector
+# Estate Studio — Build 04.0.0 DWG CAD Polygons
 
-Nou mod pentru planurile tehnice / CAD, fără AI și fără OCR runtime.
+Detectorul automat de apartamente a fost ELIMINAT complet.
 
-## De ce exista problema „un apartament cât toată planșa”
-Planurile tehnice au:
-- foarte mult fundal alb;
-- pereți și tâmplării desenați cu linii gri/colorate și subțiri;
-- uși deschise care conectează camerele cu holul comun;
-- foarte mult text și cote.
+## Noul workflow
+1. Creezi etajul.
+2. `Importă DWG`.
+3. DWG-ul este citit local în browser cu LibreDWG WebAssembly.
+4. Este convertit într-un SVG vectorial.
+5. SVG-ul este încărcat în `floor-plans` și devine `floor.plan_path`.
+6. DWG-ul original este păstrat în `project-documents`.
+7. Din SVG extragem segmentele vectoriale și le salvăm în `floor.settings.cad`.
+8. Creezi apartamentele din admin.
+9. În editorul de poligoane activezi `Magnet CAD` și punctele se lipesc exact pe geometria derivată din DWG.
 
-Detectorul vechi căuta în principal regiuni mari de spațiu liber. Dacă pereții subțiri nu erau captați suficient, tot etajul devenea o singură regiune.
+## Editor
+- `Magnet CAD` apare automat dacă etajul are DWG importat.
+- La desenare, CAD are prioritate față de snap 0/90°.
+- `Alt/Option` dezactivează temporar snap-ul.
+- `Snap edit` rămâne OFF implicit pentru mutarea liberă a punctelor.
+- `Ghidaje CAD` afișează peste plan segmentele pe care editorul le folosește la snap.
+- Pan-ul și editarea stabilă din 03.8.3 sunt păstrate.
 
-## Topology V5
-În `Plan tehnic / CAD`:
-1. extrage linework întunecat + gri/colorat;
-2. păstrează traseele structurale direcționale;
-3. închide virtual goluri de dimensiune apropiată de uși;
-4. separă planul în camere/celule;
-5. reconstruiește un graf al conexiunilor prin golurile închise;
-6. estimează holul/lobby-ul comun după conectivitate + formă + poziție;
-7. elimină zona comună din graf;
-8. grupează camerele rămase în apartamente;
-9. balcoanele pot rămâne în grup dacă sunt conectate printr-un gol de ușă.
+## Fără detector
+- `AutoApartmentDetector.jsx` a fost șters.
+- butonul `Detectează apartamente` a fost șters.
+- endpoint-ul `/api/admin/floors/:id/auto-apartments` a fost șters.
+- Tesseract/OCR nu există în build.
 
-## Moduri
-- `Auto` — alege automat technical vs rendered;
-- `Plan tehnic / CAD` — forțează Topology V5;
-- `Plan randat / color` — păstrează Architectural V2.
+## Stocare
+Nu este necesară migrare DB:
+- preview SVG: `floor.plan_path`;
+- DWG original: `project-documents`;
+- metadata + segmente CAD: `floor.settings.cad`.
 
-Nu am reintrodus Tesseract/OCR; buildul rămâne fără acea dependență care a provocat crash-uri.
+## Runtime DWG
+Clientul folosește `@mlightcad/libredwg-web` și copiază WASM-ul în `/assets/` la build.
 
-`/api/version` => `03.9.0-technical-topology-detector`
+Notă de licențiere: `@mlightcad/libredwg-web` / LibreDWG este GPL. Pentru utilizare comercială/distribuție trebuie verificată compatibilitatea licenței cu proiectul.
+
+`/api/version` => `04.0.0-dwg-cad-polygons`
 
 # Estate Studio — Build 03.8.4 Detector Runtime Rollback
 

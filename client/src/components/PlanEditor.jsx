@@ -1,5 +1,5 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {Stage,Layer,Group,Image as KImage,Line,Circle,Text,Rect} from 'react-konva';
+import {Stage,Layer,Group,Image as KImage,Line,Circle,Text,Rect,Shape} from 'react-konva';
 import {api,statusLabel} from '../api';
 
 function useHtmlImage(src){
@@ -26,6 +26,44 @@ function clamp01(v){
 
 function distance(a,b){
   return Math.hypot(a.x-b.x,a.y-b.y);
+}
+
+function projectToSegment(p,s){
+  const ax=s[0],ay=s[1],bx=s[2],by=s[3];
+  const dx=bx-ax,dy=by-ay;
+  const len2=dx*dx+dy*dy;
+  if(len2<1e-12)return {x:ax,y:ay,d:Math.hypot(p.x-ax,p.y-ay),endpoint:true};
+
+  let t=((p.x-ax)*dx+(p.y-ay)*dy)/len2;
+  t=Math.max(0,Math.min(1,t));
+  const x=ax+dx*t,y=ay+dy*t;
+  return {
+    x,y,
+    d:Math.hypot(p.x-x,p.y-y),
+    endpoint:t<.035||t>.965
+  };
+}
+
+function nearestCadSnap(p,segments,threshold){
+  let best=null;
+  for(const s of segments||[]){
+    if(!Array.isArray(s)||s.length<4)continue;
+    const hit=projectToSegment(p,s);
+    if(hit.d<=threshold && (!best || hit.d<best.d)){
+      best=hit;
+    }
+
+    // Endpoints get a small magnetic preference so wall intersections are easy to hit.
+    const da=Math.hypot(p.x-s[0],p.y-s[1]);
+    if(da<=threshold*1.18 && (!best || da*.82<best.d)){
+      best={x:s[0],y:s[1],d:da*.82,endpoint:true};
+    }
+    const db=Math.hypot(p.x-s[2],p.y-s[3]);
+    if(db<=threshold*1.18 && (!best || db*.82<best.d)){
+      best={x:s[2],y:s[3],d:db*.82,endpoint:true};
+    }
+  }
+  return best?{x:clamp01(best.x),y:clamp01(best.y)}:null;
 }
 
 function applySnap(raw, points, {
@@ -93,6 +131,10 @@ export default function PlanEditor({floor,onChanged}){
   const [snap45,setSnap45]=useState(false);
   const [snapVertices,setSnapVertices]=useState(true);
   const [snapEdit,setSnapEdit]=useState(false);
+  const cadSegments=Array.isArray(floor?.settings?.cad?.segments)?floor.settings.cad.segments:[];
+  const hasCad=cadSegments.length>0;
+  const [snapCad,setSnapCad]=useState(hasCad);
+  const [showCadGuides,setShowCadGuides]=useState(false);
 
   const selected=(floor?.apartments||[]).find(a=>a.id===selectedId);
 
@@ -100,6 +142,7 @@ export default function PlanEditor({floor,onChanged}){
     setSelectedId(floor?.apartments?.[0]?.id||null);
     setScale(1);
     setPos({x:0,y:0});
+    setSnapCad(Array.isArray(floor?.settings?.cad?.segments)&&floor.settings.cad.segments.length>0);
   },[floor?.id]);
 
   useEffect(()=>{
@@ -158,6 +201,16 @@ export default function PlanEditor({floor,onChanged}){
     };
   }
 
+  function cadThreshold(){
+    // About 10 screen pixels regardless of zoom level.
+    return Math.max(.0018,10/Math.max(1,Math.min(imgRect.w,imgRect.h)*scale));
+  }
+
+  function snapOnCad(raw){
+    if(!snapCad||!hasCad)return null;
+    return nearestCadSnap(raw,cadSegments,cadThreshold());
+  }
+
   function addPoint(e){
     if(mode!=='draw' || panWasDragging.current) return;
     const kind=e.target?.getClassName?.();
@@ -166,13 +219,19 @@ export default function PlanEditor({floor,onChanged}){
     const raw=pointerToNorm();
     const force45=e?.evt?.shiftKey;
     const disableSnap=e?.evt?.altKey || e?.evt?.metaKey;
-    const snapped=disableSnap
-      ? raw
-      : applySnap(raw,draft,{
-          snapOrtho:snapOrtho || force45,
-          snap45:snap45 || force45,
-          snapVertices
-        });
+
+    let snapped=raw;
+
+    if(!disableSnap){
+      // CAD geometry is the highest-priority guide. If the click is close enough
+      // to a DWG line / endpoint, the polygon point sits exactly on that vector.
+      const cadHit=snapOnCad(raw);
+      snapped=cadHit||applySnap(raw,draft,{
+        snapOrtho:snapOrtho || force45,
+        snap45:snap45 || force45,
+        snapVertices
+      });
+    }
 
     setDraft(v=>[...v,snapped]);
   }
@@ -258,13 +317,14 @@ export default function PlanEditor({floor,onChanged}){
           : neighbours[1];
       }
 
-      arr[i]=anchor
+      const cadHit=snapOnCad(raw);
+      arr[i]=cadHit || (anchor
         ? applySnap(raw,[anchor],{
             snapOrtho:true,
             snap45:snap45 || forceSnap,
             snapVertices:false
           })
-        : raw;
+        : raw);
 
       return arr;
     });
@@ -321,6 +381,8 @@ export default function PlanEditor({floor,onChanged}){
           <button className={snap45?'active':''} onClick={()=>setSnap45(v=>!v)}>45°</button>
           <button className={snapVertices?'active':''} onClick={()=>setSnapVertices(v=>!v)}>Vertices</button>
           <button className={snapEdit?'active':''} onClick={()=>setSnapEdit(v=>!v)}>Snap edit</button>
+          {hasCad&&<button className={snapCad?'active':''} onClick={()=>setSnapCad(v=>!v)}>Magnet CAD</button>}
+          {hasCad&&<button className={showCadGuides?'active':''} onClick={()=>setShowCadGuides(v=>!v)}>Ghidaje CAD</button>}
         </div>
 
         <button onClick={()=>setDraft(v=>v.slice(0,-1))}>Undo punct</button>
@@ -397,6 +459,21 @@ export default function PlanEditor({floor,onChanged}){
                 <Rect width={size.w} height={size.h} fill="#e9edea"/>
                 {image && <KImage image={image} x={imgRect.x} y={imgRect.y} width={imgRect.w} height={imgRect.h}/>}
 
+                {hasCad&&showCadGuides&&<Shape
+                  listening={false}
+                  stroke="#00a7c7"
+                  strokeWidth={1/scale}
+                  opacity={.55}
+                  sceneFunc={(ctx,shape)=>{
+                    ctx.beginPath();
+                    for(const s of cadSegments){
+                      ctx.moveTo(imgRect.x+s[0]*imgRect.w,imgRect.y+s[1]*imgRect.h);
+                      ctx.lineTo(imgRect.x+s[2]*imgRect.w,imgRect.y+s[3]*imgRect.h);
+                    }
+                    ctx.strokeShape(shape);
+                  }}
+                />}
+
               {(floor?.apartments||[]).filter(a=>a.id!==selectedId).map(a=>{
                 const ps=polygonPoints(a);
                 if(ps.length<3) return null;
@@ -457,9 +534,11 @@ export default function PlanEditor({floor,onChanged}){
       </div>
 
       <p className="hint">
-        La <b>Editează</b>, punctele se mișcă liber, exact unde le tragi. Snap-ul la editare este oprit implicit;
-        îl activezi din <b>Snap edit</b> sau ții <b>Shift</b> temporar. La desenare rămân active 0/90°, 45° și lipirea pe vertex-uri.
-        Punctele sunt limitate strict la suprafața planului, iar pan-ul este limitat astfel încât planul nu mai poate ieși complet din viewport.
+        {hasCad
+          ? <>Plan CAD activ · <b>{cadSegments.length} segmente vectoriale</b>. În modul Desenează, <b>Magnet CAD</b> fixează punctele direct pe liniile și capetele din DWG. La editare punctele rămân libere; activează <b>Snap edit</b> dacă vrei magnet și la mutare. <b>Alt/Option</b> dezactivează temporar orice snap.</>
+          : <>La <b>Editează</b>, punctele se mișcă liber, exact unde le tragi. Snap-ul la editare este oprit implicit; îl activezi din <b>Snap edit</b> sau ții <b>Shift</b> temporar. La desenare rămân active 0/90°, 45° și lipirea pe vertex-uri.</>
+        }
+        {' '}Punctele sunt limitate strict la suprafața planului, iar pan-ul este limitat astfel încât planul nu mai poate ieși complet din viewport.
       </p>
     </div>
   );

@@ -3,7 +3,7 @@ import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'reac
 import {api,slugify,statusLabel} from '../api';
 const ThreeViewer=lazy(()=>import('./ThreeViewer'));
 const PlanEditor=lazy(()=>import('./PlanEditor'));
-const AutoApartmentDetector=lazy(()=>import('./AutoApartmentDetector'));
+const CadPlanImporter=lazy(()=>import('./CadPlanImporter'));
 const SharedModelMapper=lazy(()=>import('./SharedModelMapper'));
 
 const STEPS=[['general','General'],['buildings','Blocuri'],['model','Model 3D'],['calibration','Calibrare'],['floors','Etaje'],['plans','Planuri & apartamente'],['preview','Preview'],['embed','Embed']];
@@ -123,7 +123,7 @@ function Plans({p,reload}){
   const [bid,setBid]=useState(p.buildings?.[0]?.id);
   const b=p.buildings.find(x=>x.id===bid)||p.buildings[0];
   const [fid,setFid]=useState(b?.floors?.[0]?.id);
-  const [edit,setEdit]=useState(null),[newOpen,setNewOpen]=useState(false),[autoOpen,setAutoOpen]=useState(false);
+  const [edit,setEdit]=useState(null),[newOpen,setNewOpen]=useState(false),[cadOpen,setCadOpen]=useState(false);
 
   useEffect(()=>{
     if(!b?.floors?.find(x=>x.id===fid))setFid(b?.floors?.[0]?.id)
@@ -148,7 +148,7 @@ function Plans({p,reload}){
     <SectionHead
       kicker="05 · PLANURI & APARTAMENTE"
       title="Plan interactiv"
-      desc="Încarcă planul, detectează automat apartamentele sau trasează manual poligoanele."
+      desc="Importă planul DWG, vezi-l ca SVG vectorial și trasează poligoanele cu snap direct pe geometria CAD."
       actions={<div className="inline-selects">
         <select value={b.id} onChange={e=>setBid(e.target.value)}>{p.buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
         <select value={f?.id||''} onChange={e=>setFid(e.target.value)}>{(b.floors||[]).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
@@ -157,13 +157,17 @@ function Plans({p,reload}){
 
     {!f?<div className="empty-state"><b>Nu există etaje.</b><span>Generează etajele înainte de a adăuga planuri.</span></div>:<>
       <div className="panel plan-head">
-        <div><h3>{f.name}</h3><p>{f.height_from_m}–{f.height_to_m} m · {(f.apartments||[]).length} apartamente</p></div>
+        <div>
+          <h3>{f.name}</h3>
+          <p>{f.height_from_m}–{f.height_to_m} m · {(f.apartments||[]).length} apartamente</p>
+          {f.settings?.cad?.source_file&&<span className="cad-source-badge">CAD · {f.settings.cad.source_file} · {f.settings.cad.segment_count||0} segmente</span>}
+        </div>
         <div>
           <label className="button-file">
             <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadPlan(e.target.files[0])}/>
-            {f.plan_path?'Înlocuiește planul':'Încarcă planul'}
+            {f.plan_path?'Imagine fallback':'Încarcă imagine fallback'}
           </label>
-          {f.plan_path&&<button className="auto-detect-btn" onClick={()=>setAutoOpen(true)}>✦ Detectează apartamente</button>}
+          <button className="cad-import-btn" onClick={()=>setCadOpen(true)}>⌁ Importă DWG</button>
           <button className="primary" onClick={()=>setNewOpen(true)}>＋ Apartament</button>
         </div>
       </div>
@@ -186,7 +190,7 @@ function Plans({p,reload}){
 
       <PlanEditor floor={f} onChanged={reload}/>
 
-      {autoOpen&&<AutoApartmentDetector floor={f} onClose={()=>setAutoOpen(false)} onCommitted={reload}/>}
+      {cadOpen&&<CadPlanImporter project={p} building={b} floor={f} onClose={()=>setCadOpen(false)} onImported={reload}/>}
       {(newOpen||edit)&&<ApartmentForm project={p} floor={f} apartment={edit} onSaved={()=>{setEdit(null);setNewOpen(false);reload()}} onCancel={()=>{setEdit(null);setNewOpen(false)}}/>}
     </>}
   </>
