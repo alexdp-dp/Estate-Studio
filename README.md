@@ -1,3 +1,37 @@
+# Estate Studio — Build 03.9.0 Technical Topology Detector
+
+Nou mod pentru planurile tehnice / CAD, fără AI și fără OCR runtime.
+
+## De ce exista problema „un apartament cât toată planșa”
+Planurile tehnice au:
+- foarte mult fundal alb;
+- pereți și tâmplării desenați cu linii gri/colorate și subțiri;
+- uși deschise care conectează camerele cu holul comun;
+- foarte mult text și cote.
+
+Detectorul vechi căuta în principal regiuni mari de spațiu liber. Dacă pereții subțiri nu erau captați suficient, tot etajul devenea o singură regiune.
+
+## Topology V5
+În `Plan tehnic / CAD`:
+1. extrage linework întunecat + gri/colorat;
+2. păstrează traseele structurale direcționale;
+3. închide virtual goluri de dimensiune apropiată de uși;
+4. separă planul în camere/celule;
+5. reconstruiește un graf al conexiunilor prin golurile închise;
+6. estimează holul/lobby-ul comun după conectivitate + formă + poziție;
+7. elimină zona comună din graf;
+8. grupează camerele rămase în apartamente;
+9. balcoanele pot rămâne în grup dacă sunt conectate printr-un gol de ușă.
+
+## Moduri
+- `Auto` — alege automat technical vs rendered;
+- `Plan tehnic / CAD` — forțează Topology V5;
+- `Plan randat / color` — păstrează Architectural V2.
+
+Nu am reintrodus Tesseract/OCR; buildul rămâne fără acea dependență care a provocat crash-uri.
+
+`/api/version` => `03.9.0-technical-topology-detector`
+
 # Estate Studio — Build 03.8.4 Detector Runtime Rollback
 
 HOTFIX pentru crash-ul detectorului de apartamente.

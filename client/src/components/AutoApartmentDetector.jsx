@@ -435,6 +435,399 @@ function contourForLabel(labelMap,target,w,h){
   return polygon.map(([x,y])=>({x:clamp(x/w,0,1),y:clamp(y/h,0,1)}));
 }
 
+
+function technicalPlanScore(imageData){
+  const d=imageData.data;
+  let white=0,dark=0,colored=0,total=0;
+
+  for(let p=0;p<d.length;p+=16){ // sample every 4th pixel
+    const r=d[p],g=d[p+1],b=d[p+2],a=d[p+3];
+    if(a<48)continue;
+    total++;
+    const max=Math.max(r,g,b),min=Math.min(r,g,b);
+    const gray=.299*r+.587*g+.114*b;
+    if(gray>238)white++;
+    if(gray<175)dark++;
+    if(max-min>22 && max<250)colored++;
+  }
+
+  if(!total)return 0;
+  const whiteRatio=white/total;
+  const darkRatio=dark/total;
+  const coloredRatio=colored/total;
+
+  // Technical/CAD plans have a huge white background and relatively sparse linework.
+  return whiteRatio*1.25 - darkRatio*.45 + Math.min(.15,coloredRatio)*.35;
+}
+
+function buildTechnicalInk(imageData,w,h){
+  const d=imageData.data,N=w*h;
+  const ink=new Uint8Array(N);
+  const strong=new Uint8Array(N);
+
+  for(let i=0,p=0;i<N;i++,p+=4){
+    if(d[p+3]<48)continue;
+    const r=d[p],g=d[p+1],b=d[p+2];
+    const max=Math.max(r,g,b),min=Math.min(r,g,b);
+    const gray=.299*r+.587*g+.114*b;
+    const saturation=max-min;
+
+    // CAD plans often use light grey / blue / green wall and window lines.
+    if(gray<228 || (saturation>18 && max<250))ink[i]=1;
+    if(gray<178 || (saturation>42 && max<235))strong[i]=1;
+  }
+
+  const base=Math.min(w,h);
+  const shortRun=Math.max(5,Math.round(base*.0055));
+  const longRun=Math.max(10,Math.round(base*.011));
+
+  // Keep directional strokes. Using two run lengths retains thin technical walls
+  // but rejects a large amount of isolated room text / dimensions.
+  let directional=keepLongRuns(ink,w,h,shortRun);
+  const longDirectional=keepLongRuns(ink,w,h,longRun);
+  for(let i=0;i<N;i++){
+    if(longDirectional[i]||strong[i])directional[i]=1;
+  }
+
+  directional=morphDilate(directional,w,h);
+  return directional;
+}
+
+function bridgeTechnicalGaps(src,w,h,maxGap,minSupport){
+  const out=src.slice();
+  const gaps=[];
+
+  function scan(get,set,len,orientation,axis){
+    const runs=[];
+    let i=0;
+    while(i<len){
+      while(i<len&&!get(i))i++;
+      const start=i;
+      while(i<len&&get(i))i++;
+      if(i>start)runs.push([start,i-1]);
+    }
+
+    for(let r=0;r<runs.length-1;r++){
+      const a=runs[r],b=runs[r+1];
+      const gap=b[0]-a[1]-1;
+      const lenA=a[1]-a[0]+1;
+      const lenB=b[1]-b[0]+1;
+
+      if(gap>=2 && gap<=maxGap && lenA>=minSupport && lenB>=minSupport){
+        const from=a[1]+1,to=b[0]-1;
+        for(let k=from;k<=to;k++)set(k);
+        gaps.push({orientation,axis,from,to,size:gap});
+      }
+    }
+  }
+
+  for(let y=0;y<h;y++){
+    scan(i=>!!src[y*w+i],i=>{out[y*w+i]=1},w,'h',y);
+  }
+
+  for(let x=0;x<w;x++){
+    scan(i=>!!src[i*w+x],i=>{out[i*w+x]=1},h,'v',x);
+  }
+
+  return {mask:out,gaps};
+}
+
+function technicalCells(imageData,w,h){
+  const N=w*h;
+  const base=Math.min(w,h);
+  const ink=buildTechnicalInk(imageData,w,h);
+
+  // First reconnect only normal door-sized / anti-alias gaps.
+  const bridged=bridgeTechnicalGaps(
+    ink,w,h,
+    Math.max(8,Math.round(base*.022)),
+    Math.max(3,Math.round(base*.0035))
+  );
+
+  let closed=bridged.mask;
+  closed=morphDilate(closed,w,h);
+  closed=morphDilate(closed,w,h);
+
+  const free=new Uint8Array(N);
+  for(let i=0;i<N;i++)free[i]=closed[i]?0:1;
+
+  const cc=components(free,w,h,true);
+
+  const minArea=Math.max(160,N*.00022);
+  const maxArea=N*.15;
+
+  const cells=cc.stats.filter(st=>{
+    if(st.touchesBorder)return false;
+    if(st.area<minArea||st.area>maxArea)return false;
+    if(st.width<5||st.height<5)return false;
+    return true;
+  });
+
+  const cellIds=new Set(cells.map(c=>c.id));
+  const adjacency=new Map();
+
+  function addEdge(a,b,gap){
+    if(!a||!b||a===b||!cellIds.has(a)||!cellIds.has(b))return;
+    const lo=Math.min(a,b),hi=Math.max(a,b),k=`${lo}:${hi}`;
+    const e=adjacency.get(k)||{a:lo,b:hi,count:0,gaps:[]};
+    e.count++;
+    if(e.gaps.length<12)e.gaps.push(gap);
+    adjacency.set(k,e);
+  }
+
+  // Every inserted bridge is a possible doorway/opening. Look on opposite sides
+  // of the closed gap for the two room cells that it separated.
+  const look=Math.max(6,Math.round(base*.016));
+
+  for(const gap of bridged.gaps){
+    const mid=Math.round((gap.from+gap.to)/2);
+
+    if(gap.orientation==='h'){
+      const x=clamp(mid,0,w-1),y=gap.axis;
+      let up=0,down=0;
+      for(let d=2;d<=look&&!up;d++){
+        const yy=y-d;
+        if(yy>=0)up=cc.labels[yy*w+x];
+      }
+      for(let d=2;d<=look&&!down;d++){
+        const yy=y+d;
+        if(yy<h)down=cc.labels[yy*w+x];
+      }
+      addEdge(up,down,gap);
+    }else{
+      const x=gap.axis,y=clamp(mid,0,h-1);
+      let left=0,right=0;
+      for(let d=2;d<=look&&!left;d++){
+        const xx=x-d;
+        if(xx>=0)left=cc.labels[y*w+xx];
+      }
+      for(let d=2;d<=look&&!right;d++){
+        const xx=x+d;
+        if(xx<w)right=cc.labels[y*w+xx];
+      }
+      addEdge(left,right,gap);
+    }
+  }
+
+  // Keep repeated evidence only; one-pixel drafting noise must not become a door.
+  const edges=[...adjacency.values()].filter(e=>e.count>=2);
+
+  const degree=new Map(cells.map(c=>[c.id,0]));
+  for(const e of edges){
+    degree.set(e.a,(degree.get(e.a)||0)+1);
+    degree.set(e.b,(degree.get(e.b)||0)+1);
+  }
+
+  return {ink,closed,cc,cells,edges,degree};
+}
+
+function chooseCommonCells(topology,w,h){
+  const {cells,degree}=topology;
+  if(!cells.length)return [];
+
+  const centerX=w/2,centerY=h/2;
+  const maxArea=Math.max(...cells.map(c=>c.area),1);
+  const maxDegree=Math.max(...cells.map(c=>degree.get(c.id)||0),1);
+
+  const scored=cells.map(c=>{
+    const deg=(degree.get(c.id)||0)/maxDegree;
+    const area=c.area/maxArea;
+    const aspect=Math.max(c.width,c.height)/Math.max(1,Math.min(c.width,c.height));
+    const elongated=Math.min(1,Math.max(0,(aspect-1.8)/4));
+    const centerDist=Math.hypot(c.cx-centerX,c.cy-centerY)/Math.hypot(centerX,centerY);
+    const central=1-clamp(centerDist,0,1);
+    const score=deg*.48+area*.18+elongated*.18+central*.16;
+    return {cell:c,score,deg,area,elongated,central};
+  }).sort((a,b)=>b.score-a.score);
+
+  if(!scored.length)return [];
+  const best=scored[0];
+
+  // Only call it common space if there is actual graph evidence.
+  if((degree.get(best.cell.id)||0)<3)return [];
+
+  const out=[best.cell.id];
+
+  // A lobby can be split into 2-3 cells around a lift/stair core. Include direct
+  // high-degree neighbours whose score is close to the main corridor.
+  for(const item of scored.slice(1,8)){
+    if(item.score<best.score*.68)continue;
+    if((degree.get(item.cell.id)||0)<2)continue;
+
+    const connected=topology.edges.some(e=>
+      (e.a===best.cell.id&&e.b===item.cell.id) ||
+      (e.b===best.cell.id&&e.a===item.cell.id)
+    );
+    if(connected)out.push(item.cell.id);
+  }
+
+  return out;
+}
+
+function graphGroups(topology,commonIds){
+  const common=new Set(commonIds);
+  const nodes=topology.cells.filter(c=>!common.has(c.id));
+  const nodeSet=new Set(nodes.map(n=>n.id));
+  const graph=new Map(nodes.map(n=>[n.id,[]]));
+
+  for(const e of topology.edges){
+    if(!nodeSet.has(e.a)||!nodeSet.has(e.b))continue;
+    graph.get(e.a).push(e.b);
+    graph.get(e.b).push(e.a);
+  }
+
+  const seen=new Set(),groups=[];
+
+  for(const n of nodes){
+    if(seen.has(n.id))continue;
+    const ids=[],queue=[n.id];
+    seen.add(n.id);
+
+    while(queue.length){
+      const id=queue.shift();
+      ids.push(id);
+      for(const next of graph.get(id)||[]){
+        if(!seen.has(next)){
+          seen.add(next);
+          queue.push(next);
+        }
+      }
+    }
+
+    groups.push(ids);
+  }
+
+  return groups;
+}
+
+function topologyGroupMask(topology,groupIds,w,h){
+  const idSet=new Set(groupIds);
+  const mask=new Uint8Array(w*h);
+
+  for(let i=0;i<topology.cc.labels.length;i++){
+    if(idSet.has(topology.cc.labels[i]))mask[i]=1;
+  }
+
+  // Re-open only door bridges that connect two cells in the SAME apartment group.
+  for(const e of topology.edges){
+    if(!idSet.has(e.a)||!idSet.has(e.b))continue;
+    for(const gap of e.gaps){
+      if(gap.orientation==='h'){
+        const y=gap.axis;
+        for(let x=gap.from;x<=gap.to;x++){
+          for(let yy=Math.max(0,y-2);yy<=Math.min(h-1,y+2);yy++)mask[yy*w+x]=1;
+        }
+      }else{
+        const x=gap.axis;
+        for(let y=gap.from;y<=gap.to;y++){
+          for(let xx=Math.max(0,x-2);xx<=Math.min(w-1,x+2);xx++)mask[y*w+xx]=1;
+        }
+      }
+    }
+  }
+
+  // Bring the free-space contour a little towards the wall centreline.
+  return morphDilate(mask,w,h);
+}
+
+function contourForBinaryMask(mask,w,h){
+  const labels=new Int16Array(mask.length);
+  for(let i=0;i<mask.length;i++)if(mask[i])labels[i]=1;
+  return contourForLabel(labels,1,w,h);
+}
+
+function analyzeTechnicalPlan(imageData,w,h,expected=0){
+  const topology=technicalCells(imageData,w,h);
+  const commonIds=chooseCommonCells(topology,w,h);
+  const cellById=new Map(topology.cells.map(c=>[c.id,c]));
+
+  let groups=graphGroups(topology,commonIds)
+    .map(ids=>{
+      const cells=ids.map(id=>cellById.get(id)).filter(Boolean);
+      const area=cells.reduce((s,c)=>s+c.area,0);
+      const cx=cells.reduce((s,c)=>s+c.cx*c.area,0)/Math.max(1,area);
+      const cy=cells.reduce((s,c)=>s+c.cy*c.area,0)/Math.max(1,area);
+      return {ids,cells,area,cx,cy};
+    });
+
+  const areas=groups.map(g=>g.area).sort((a,b)=>a-b);
+  const median=areas.length?areas[Math.floor(areas.length/2)]:1;
+
+  // Remove obvious tiny drafting islands / dimensions, but keep a possible studio.
+  groups=groups.filter(g=>{
+    if(g.area<Math.max(350,median*.28))return false;
+    if(g.cells.length===1){
+      const c=g.cells[0];
+      const aspect=Math.min(c.width,c.height)/Math.max(c.width,c.height);
+      if(aspect<.16 && g.area<median*.85)return false;
+    }
+    return true;
+  });
+
+  groups.sort((a,b)=>b.area-a.area);
+
+  if(Number(expected)>0 && groups.length>Number(expected)){
+    groups=groups.slice(0,Number(expected));
+  }else if(!Number(expected) && groups.length>30){
+    groups=groups.slice(0,30);
+  }
+
+  const detections=groups.map(g=>{
+    const mask=topologyGroupMask(topology,g.ids,w,h);
+    const points=contourForBinaryMask(mask,w,h);
+    const roomCount=g.cells.length;
+    const confidence=clamp(.62+Math.min(.20,roomCount*.025)+Math.min(.08,(g.area/Math.max(1,median))*.03),.58,.90);
+
+    return {
+      componentId:g.ids[0],
+      roomIds:g.ids,
+      roomCount,
+      points,
+      confidence,
+      area:g.area,
+      cx:g.cx/w,
+      cy:g.cy/h
+    };
+  }).filter(d=>d.points.length>=4);
+
+  detections.sort((a,b)=>{
+    const rowA=Math.round(a.cy*8),rowB=Math.round(b.cy*8);
+    return rowA===rowB?a.cx-b.cx:a.cy-b.cy;
+  });
+
+  let likelyCore=null;
+  if(commonIds.length){
+    const commonMask=new Uint8Array(w*h);
+    const commonSet=new Set(commonIds);
+    for(let i=0;i<topology.cc.labels.length;i++){
+      if(commonSet.has(topology.cc.labels[i]))commonMask[i]=1;
+    }
+    const corePoints=contourForBinaryMask(morphDilate(commonMask,w,h),w,h);
+    const commonCells=commonIds.map(id=>cellById.get(id)).filter(Boolean);
+    likelyCore={
+      id:commonIds[0],
+      area:commonCells.reduce((s,c)=>s+c.area,0),
+      points:corePoints,
+      technical:true
+    };
+  }
+
+  return {
+    detections,
+    initialCandidates:[],
+    excludedIds:new Set(),
+    likelyCore,
+    threshold:'topology',
+    expected:Number(expected)||0,
+    width:w,
+    height:h,
+    technical:true,
+    roomCount:topology.cells.length,
+    doorEdges:topology.edges.length,
+    commonCount:commonIds.length
+  };
+}
+
 function analyzePixels(imageData,w,h,threshold,expected,excludedIds=new Set(),seedPoints=[]){
   const d=imageData.data,N=w*h;
   const opaque=new Uint8Array(N),dark=new Uint8Array(N);
@@ -627,6 +1020,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
   const [autoThreshold,setAutoThreshold]=useState(true);
   const [guided,setGuided]=useState(false);
   const [seeds,setSeeds]=useState([]);
+  const [planMode,setPlanMode]=useState('auto');
   const [aspect,setAspect]=useState(1);
   const [busy,setBusy]=useState(false);
   const [raw,setRaw]=useState(null);
@@ -660,9 +1054,14 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     try{
       const loaded=raw||await loadPlan(floor.plan_path);
       if(!raw)setRaw(loaded);
-      const r=autoThreshold
-        ? analyzeAuto(loaded.imageData,loaded.w,loaded.h,expected,new Set(),guided?seeds:[])
-        : analyzePixels(loaded.imageData,loaded.w,loaded.h,Number(threshold)||95,expected,new Set(),guided?seeds:[]);
+      const technicalAuto=technicalPlanScore(loaded.imageData)>.80;
+      const useTechnical=!guided && (planMode==='technical' || (planMode==='auto'&&technicalAuto));
+
+      const r=useTechnical
+        ? analyzeTechnicalPlan(loaded.imageData,loaded.w,loaded.h,expected)
+        : autoThreshold
+          ? analyzeAuto(loaded.imageData,loaded.w,loaded.h,expected,new Set(),guided?seeds:[])
+          : analyzePixels(loaded.imageData,loaded.w,loaded.h,Number(threshold)||95,expected,new Set(),guided?seeds:[]);
       setExcluded(new Set());
       setResult(r);
       if(r?.threshold)setThreshold(r.threshold);
@@ -676,9 +1075,14 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
 
   function recompute(nextExcluded){
     if(!raw)return;
-    const r=autoThreshold
-      ? analyzeAuto(raw.imageData,raw.w,raw.h,expected,nextExcluded,guided?seeds:[])
-      : analyzePixels(raw.imageData,raw.w,raw.h,Number(threshold)||95,expected,nextExcluded,guided?seeds:[]);
+    const technicalAuto=technicalPlanScore(raw.imageData)>.80;
+    const useTechnical=!guided && (planMode==='technical' || (planMode==='auto'&&technicalAuto));
+
+    const r=useTechnical
+      ? analyzeTechnicalPlan(raw.imageData,raw.w,raw.h,expected)
+      : autoThreshold
+        ? analyzeAuto(raw.imageData,raw.w,raw.h,expected,nextExcluded,guided?seeds:[])
+        : analyzePixels(raw.imageData,raw.w,raw.h,Number(threshold)||95,expected,nextExcluded,guided?seeds:[]);
     setExcluded(nextExcluded);setResult(r);
     const m={};
     r.detections.forEach((d,i)=>{m[i]=existing[i]?.id||'new'});
@@ -686,6 +1090,10 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
   }
 
   function markCommon(componentId){
+    if(result?.technical){
+      setMessage('În modul Topology V5 zona comună este calculată din graful camerelor. Reglajul manual al core-ului îl adăugăm separat.');
+      return;
+    }
     const next=new Set(excluded);
     if(next.has(componentId))next.delete(componentId);else next.add(componentId);
     recompute(next);
@@ -739,10 +1147,17 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     <div className="modal-card auto-detector-card">
       <button className="x" onClick={onClose}>×</button>
       <div className="auto-head">
-        <div><small>AUTO-DETECT · ARCHITECTURAL V2</small><h2>Detectează apartamentele</h2><p>Detectorul reconstruiește pereții ca geometrie arhitecturală, ignoră mare parte din mobilier și produce contururi din segmente drepte, cu limite comune pe axa mediană a pereților.</p></div>
+        <div><small>AUTO-DETECT · TOPOLOGY V5</small><h2>Detectează apartamentele</h2><p>În modul tehnic, detectorul nu mai caută doar „pete” mari. Închide virtual golurile de ușă, separă camerele, construiește un graf de conexiuni și încearcă să scoată holul comun înainte să grupeze camerele în apartamente.</p></div>
       </div>
 
       <div className="detector-settings detector-settings-v2">
+        <label>Tip plan
+          <select value={planMode} onChange={e=>{setPlanMode(e.target.value);setResult(null);setMessage('')}}>
+            <option value="auto">Auto</option>
+            <option value="technical">Plan tehnic / CAD</option>
+            <option value="rendered">Plan randat / color</option>
+          </select>
+        </label>
         <label>Număr apartamente estimat
           <input type="number" min="1" max="50" placeholder="Auto" value={expected} onChange={e=>setExpected(e.target.value)}/>
         </label>
@@ -804,6 +1219,14 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
 
       {!result&&!guided&&<div className="detector-intro">
         <b>Ce face detectorul</b>
+        <span>• Auto recunoaște planurile tehnice cu mult fundal alb și linework subțire;</span>
+        <span>• în Plan tehnic / CAD folosește și linii gri/colorate, nu doar pereți negri;</span>
+        <span>• închide virtual golurile de dimensiune apropiată de uși și separă camerele;</span>
+        <span>• reconstruiește conexiunile dintre camere din acele goluri;</span>
+        <span>• caută holul/lobby-ul comun după gradul de conectivitate, formă și poziție;</span>
+        <span>• după eliminarea holului comun, camerele interconectate sunt grupate ca apartamente;</span>
+        <span>• balcoanele rămân în același grup dacă au conexiune de ușă către apartament;</span>
+        <span>• pentru planuri randate păstrează detectorul Architectural V2;</span>
         <span>• caută întâi trasee lungi de perete, nu orice pixel întunecat;</span>
         <span>• mobilierul, textele și detaliile mici sunt filtrate înainte de segmentare;</span>
         <span>• golurile mici din pereți (uși / antialiasing) sunt reconectate controlat;</span>
@@ -817,7 +1240,12 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         <div className="detector-summary">
           <b>{result.detections.length} apartamente propuse</b>
           <span>{coreText}</span>
-          <small>Architectural V2 · {result.width}×{result.height}px analiză · prag {result.threshold}{guided?` · ${seeds.length} puncte-ghid`:''}</small>
+          <small>
+            {result.technical
+              ? `Topology V5 · ${result.roomCount||0} camere/celule · ${result.doorEdges||0} conexiuni · ${result.commonCount||0} zone comune`
+              : `Architectural V2 · ${result.width}×${result.height}px analiză · prag ${result.threshold}${guided?` · ${seeds.length} puncte-ghid`:''}`
+            }
+          </small>
           <small>Poți marca o propunere drept „zonă comună” și detectorul recalculează limitele.</small>
         </div>
 

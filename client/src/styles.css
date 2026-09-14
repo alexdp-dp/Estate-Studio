@@ -341,3 +341,14 @@ a.primary:hover,
   min-width:0;
   overflow:hidden;
 }
+
+/* 03.9.0 — technical topology detector */
+.detector-settings select{
+  width:100%;
+  min-height:42px;
+  border:1px solid rgba(17,17,17,.16);
+  border-radius:10px;
+  background:#fff;
+  padding:0 10px;
+  font:inherit;
+}
