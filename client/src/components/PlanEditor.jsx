@@ -1,5 +1,5 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {Stage,Layer,Image as KImage,Line,Circle,Text,Rect} from 'react-konva';
+import {Stage,Layer,Group,Image as KImage,Line,Circle,Text,Rect} from 'react-konva';
 import {api,statusLabel} from '../api';
 
 function useHtmlImage(src){
@@ -77,6 +77,8 @@ function applySnap(raw, points, {
 export default function PlanEditor({floor,onChanged}){
   const holder=useRef();
   const stageRef=useRef();
+  const viewportRef=useRef();
+  const panWasDragging=useRef(false);
   const image=useHtmlImage(floor?.plan_path);
   const [size,setSize]=useState({w:900,h:600});
   const [scale,setScale]=useState(1);
@@ -128,16 +130,21 @@ export default function PlanEditor({floor,onChanged}){
 
   function pointerToNorm(){
     const st=stageRef.current;
-    const p=st.getPointerPosition();
-    const inv={x:(p.x-pos.x)/scale,y:(p.y-pos.y)/scale};
+    const viewport=viewportRef.current;
+    const p=st?.getPointerPosition();
+    if(!st || !viewport || !p) return {x:0,y:0};
+
+    // Convertim pointerul prin inversa transformării reale a viewportului Konva.
+    // Astfel coordonatele rămân exacte indiferent de zoom/pan.
+    const local=viewport.getAbsoluteTransform().copy().invert().point(p);
     return {
-      x:clamp01((inv.x-imgRect.x)/imgRect.w),
-      y:clamp01((inv.y-imgRect.y)/imgRect.h)
+      x:clamp01((local.x-imgRect.x)/imgRect.w),
+      y:clamp01((local.y-imgRect.y)/imgRect.h)
     };
   }
 
   function addPoint(e){
-    if(mode!=='draw') return;
+    if(mode!=='draw' || panWasDragging.current) return;
     const kind=e.target?.getClassName?.();
     if(kind==='Circle') return;
 
@@ -184,12 +191,18 @@ export default function PlanEditor({floor,onChanged}){
   function onWheel(e){
     e.evt.preventDefault();
     const st=stageRef.current;
+    const pointer=st?.getPointerPosition();
+    if(!pointer) return;
+
     const old=scale;
-    const pointer=st.getPointerPosition();
-    const mouse={x:(pointer.x-pos.x)/old,y:(pointer.y-pos.y)/old};
+    const local={x:(pointer.x-pos.x)/old,y:(pointer.y-pos.y)/old};
     const next=Math.max(.5,Math.min(5,e.evt.deltaY>0?old/1.08:old*1.08));
+
     setScale(next);
-    setPos({x:pointer.x-mouse.x*next,y:pointer.y-mouse.y*next});
+    setPos({
+      x:pointer.x-local.x*next,
+      y:pointer.y-local.y*next
+    });
   }
 
   function dragVertex(i,e){
@@ -270,19 +283,32 @@ export default function PlanEditor({floor,onChanged}){
             ref={stageRef}
             width={size.w}
             height={size.h}
-            scaleX={scale}
-            scaleY={scale}
-            x={pos.x}
-            y={pos.y}
-            draggable={mode==='pan'}
-            onDragEnd={e=>setPos({x:e.target.x(),y:e.target.y()})}
             onWheel={onWheel}
             onClick={addPoint}
             onTap={addPoint}
           >
             <Layer>
-              <Rect width={size.w} height={size.h} fill="#e9edea"/>
-              {image && <KImage image={image} x={imgRect.x} y={imgRect.y} width={imgRect.w} height={imgRect.h}/>}
+              <Group
+                ref={viewportRef}
+                x={pos.x}
+                y={pos.y}
+                scaleX={scale}
+                scaleY={scale}
+                draggable={mode==='pan'}
+                onDragStart={()=>{
+                  panWasDragging.current=true;
+                }}
+                onDragEnd={e=>{
+                  // Nu mutăm Stage-ul/canvasul. Păstrăm doar transformarea grupului intern.
+                  // Asta elimină "refresh-ul" / saltul vizual la mouse-up.
+                  setPos({x:e.target.x(),y:e.target.y()});
+                  requestAnimationFrame(()=>{
+                    panWasDragging.current=false;
+                  });
+                }}
+              >
+                <Rect width={size.w} height={size.h} fill="#e9edea"/>
+                {image && <KImage image={image} x={imgRect.x} y={imgRect.y} width={imgRect.w} height={imgRect.h}/>}
 
               {(floor?.apartments||[]).filter(a=>a.id!==selectedId).map(a=>{
                 const ps=polygonPoints(a);
@@ -323,7 +349,8 @@ export default function PlanEditor({floor,onChanged}){
                 ))}
               </>}
 
-              {!image && <Text text="Încarcă planul etajului înainte de desenare" x={30} y={40} fontSize={18} fill="#55605b"/>}
+                {!image && <Text text="Încarcă planul etajului înainte de desenare" x={30} y={40} fontSize={18} fill="#55605b"/>}
+              </Group>
             </Layer>
           </Stage>
         </div>
@@ -331,7 +358,7 @@ export default function PlanEditor({floor,onChanged}){
 
       <p className="hint">
         Snap-ul este activ pentru linii drepte. Implicit ai 0/90° și lipire pe vertex-uri.
-        Ține <b>Shift</b> pentru snap la 45°, iar <b>Alt/Option</b> pentru a desena temporar fără snap.
+        Ține <b>Shift</b> pentru snap la 45°, iar <b>Alt/Option</b> pentru a desena temporar fără snap. Pan-ul mută acum doar viewportul intern, fără să refacă planul când eliberezi mouse-ul.
       </p>
     </div>
   );

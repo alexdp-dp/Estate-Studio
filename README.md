@@ -1,3 +1,12 @@
+# Estate Studio — Build 03.5 Pan Stable
+
+Fix editor plan:
+- Stage-ul Konva rămâne fix; pan/zoom se aplică unui Group intern;
+- la mouse-up după pan nu mai repoziționează / reinițializează canvas-ul;
+- coordonatele pointerului sunt calculate prin inversa transformării Konva reale;
+- pan/zoom rămân stabile în timp ce desenezi;
+- snap 0/90°, 45° și vertices din Build 03.4 rămân neschimbate.
+
 # Estate Studio — Build 03.4 Polygon Snap
 
 Fix / upgrade:
