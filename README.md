@@ -1,3 +1,40 @@
+# Estate Studio — Build 03.7.9 Tighter Complex Overview
+
+Ajustare pentru cadrul inițial / vederea de ansamblu:
+
+- când NU este selectat niciun bloc, camera nu mai stă foarte departe;
+- ansamblul rămâne complet vizibil, dar framingul este mai strâns și mai plăcut;
+- camera este puțin mai aproape de complex;
+- unghiul este puțin mai coborât, ca în referința ta;
+- FOV-ul este ușor lărgit pentru a păstra ansamblul întreg fără senzația de zoom-out excesiv;
+- și presetul `De sus` pentru ansamblu este puțin mai strâns.
+
+Pe scurt:
+- `Toate clădirile` / starea inițială = ansamblu complet, dar NU foarte îndepărtat;
+- bloc selectat = framing separat, mai apropiat, deja ajustat în 03.7.8.
+
+Include cumulativ toate funcțiile și fixurile din 03.7.8.
+
+`/api/version` => `03.7.9-tighter-complex-overview`
+
+# Estate Studio — Build 03.7.8 Looser Building Focus
+
+Ajustare pentru zoom-ul pe bloc în viewerul public:
+
+- când selectezi un bloc, cadrul final este MAI LARG;
+- nu mai vine foarte aproape în balcoane/fațadă;
+- ținta camerei este puțin mai jos pe clădire, pentru un prim-plan care arată blocul complet;
+- distanța de framing a crescut;
+- FOV-ul final pentru bloc selectat este mai larg (~36.5° în perspectivă);
+- rezultatul este mai apropiat de tipul de cadru din referința ta `/macheta/`:
+  - blocul clar în prim-plan;
+  - tot volumetrul vizibil;
+  - încă se simte focus pe blocul selectat.
+
+Include cumulativ toate funcțiile și fixurile din 03.7.7.
+
+`/api/version` => `03.7.8-looser-building-focus`
+
 # Estate Studio — Build 03.7.7 Two-Stage Selection
 
 Viewer public refăcut pe interacțiunea cerută:

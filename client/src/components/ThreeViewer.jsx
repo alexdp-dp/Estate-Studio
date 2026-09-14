@@ -359,7 +359,9 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
     // and avoids the "camera aimed at the basement" feeling.
     const target=new THREE.Vector3(
       center.x,
-      targetBox.minY + height*(selectedBuildingId ? .52 : .43),
+      // For a selected building, look a bit lower on the façade so the final frame
+      // keeps the whole block in view instead of pushing too much into the balconies.
+      targetBox.minY + height*(selectedBuildingId ? .46 : .43),
       center.z
     );
 
@@ -367,22 +369,21 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
     let desiredFov=38;
 
     if(preset==='top'){
-      const distance=Math.max(span*2.05,3.2);
+      const distance=Math.max(span*(selectedBuildingId?2.05:1.82),3.0);
       dest=new THREE.Vector3(target.x,targetBox.maxY+distance,target.z+.001);
-      desiredFov=selectedBuildingId?34:38;
+      desiredFov=selectedBuildingId?34:39;
       camera.up.set(0,0,-1);
     }else if(preset==='front'){
-      const distance=Math.max(span*(selectedBuildingId?1.75:2.0),3.0);
-      dest=new THREE.Vector3(target.x,target.y+height*.05,target.z+distance);
-      desiredFov=selectedBuildingId?33.5:38;
+      const distance=Math.max(span*(selectedBuildingId?2.0:2.0),3.2);
+      dest=new THREE.Vector3(target.x,target.y+height*.06,target.z+distance);
+      desiredFov=selectedBuildingId?36:38;
       camera.up.set(0,1,0);
     }else{
       camera.up.set(0,1,0);
 
       if(selectedBuildingId){
-        // Approach the building from the side facing away from the centre of the
-        // residential complex. This gives a clean hero shot and reduces the chance
-        // of flying through neighbouring blocks.
+        // Looser hero framing: show the whole block in a pleasant perspective,
+        // not a very tight "nose in the balconies" close-up.
         let outward=new THREE.Vector3(center.x-sceneCenter.x,0,center.z-sceneCenter.z);
         if(outward.lengthSq()<.04){
           outward=camera.position.clone().sub(target);outward.y=0;
@@ -392,17 +393,17 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
 
         const tangent=new THREE.Vector3(-outward.z,0,outward.x);
         const distance=Math.max(
-          Math.max(width,depth)*1.40,
-          height*.92,
-          2.25
+          Math.max(width,depth)*2.05,
+          height*1.10,
+          3.15
         );
 
         dest=target.clone()
           .add(outward.multiplyScalar(distance))
-          .add(tangent.multiplyScalar(distance*.16))
-          .add(new THREE.Vector3(0,height*.16,0));
+          .add(tangent.multiplyScalar(distance*.10))
+          .add(new THREE.Vector3(0,height*.24,0));
 
-        desiredFov=32.5;
+        desiredFov=36.5;
       }else{
         const sceneSpan=Math.max(
           sceneBox.maxX-sceneBox.minX,
@@ -410,13 +411,17 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
           sceneBox.maxY-sceneBox.minY,
           1
         );
-        const distance=sceneSpan*1.55+1.2;
+
+        // Full-complex framing should feel composed, not extremely zoomed out.
+        // Keep the whole ensemble in view, but closer to the reference:
+        // slightly nearer camera, a bit lower, and a touch wider FOV.
+        const distance=sceneSpan*1.24+.85;
         dest=new THREE.Vector3(
-          target.x+distance*.80,
-          target.y+distance*.45,
-          target.z+distance*.90
+          target.x+distance*.68,
+          target.y+distance*.31,
+          target.z+distance*.78
         );
-        desiredFov=38;
+        desiredFov=40;
       }
     }
 
