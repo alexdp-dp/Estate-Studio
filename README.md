@@ -1,3 +1,41 @@
+# Estate Studio — Build 03.7.11 Camera Framing Tune
+
+Ajustări cameră viewer public:
+
+## Bloc selectat
+- nu mai vine aproape frontal;
+- perspectiva implicită este un cadru 3/4 ușor, cu latura clădirii vizibilă;
+- camera alege automat partea stânga/dreapta care cere cea mai mică rotire față de poziția curentă;
+- clădirea rămâne complet vizibilă, fără close-up în balcoane;
+- fly-ul cinematic rămâne activ.
+
+## Tot ansamblul
+- camera este semnificativ mai aproape;
+- ansamblul ocupă mai mult din cadru;
+- unghiul rămâne perspectivă, nu top-down;
+- FOV ușor mai larg pentru a ține tot complexul în cadru fără senzație de zoom-out.
+
+Include cumulativ toate funcțiile și fixurile din 03.7.10.
+
+`/api/version` => `03.7.11-camera-framing-tune`
+
+# Estate Studio — Build 03.7.10 Floor Gap Hover Fix
+
+Comportament nou când un bloc este deja selectat:
+
+- hover-ul este permis NUMAI dacă cursorul se află într-un interval real de etaj;
+- dacă cursorul este între două intervale de etaj:
+  - nu apare tooltip;
+  - nu apare highlight;
+  - blocul nu devine din nou selectabil;
+  - click-ul nu face nimic;
+- în vederea de ansamblu, hover-ul pe întregul bloc rămâne neschimbat;
+- după focus pe bloc, interacțiunea devine strict `etaj → plan`.
+
+Include cumulativ toate funcțiile și fixurile din 03.7.9.
+
+`/api/version` => `03.7.10-floor-gap-hover-fix`
+
 # Estate Studio — Build 03.7.9 Tighter Complex Overview
 
 Ajustare pentru cadrul inițial / vederea de ansamblu:

@@ -98,17 +98,33 @@ function IndividualBuilding({building,selectedBuildingId,selectedFloor,hoveredFl
     e.stopPropagation();
 
     // STAGE 1 — overview:
-    // while the building is not the active building, hover applies to the whole block.
-    // No floor is exposed/selectable yet.
+    // while the building is not active, hover applies to the whole block.
     const isActive=selectedBuildingId===building.id;
-    const floor=isActive
-      ? floorAtWorldY(building,e.point.y,unitPerMeter,baseY)
-      : null;
+
+    if(!isActive){
+      onHover?.({
+        building,
+        floor:null,
+        stage:'building',
+        clientX:e.nativeEvent?.clientX??0,
+        clientY:e.nativeEvent?.clientY??0
+      });
+      return;
+    }
+
+    // STAGE 2 — focused building:
+    // only actual floor bands are interactive. If the cursor is in a gap
+    // between configured floors, show NOTHING and do not highlight the block.
+    const floor=floorAtWorldY(building,e.point.y,unitPerMeter,baseY);
+    if(!floor){
+      onLeave?.(building);
+      return;
+    }
 
     onHover?.({
       building,
       floor,
-      stage:isActive?'floor':'building',
+      stage:'floor',
       clientX:e.nativeEvent?.clientX??0,
       clientY:e.nativeEvent?.clientY??0
     });
@@ -124,9 +140,11 @@ function IndividualBuilding({building,selectedBuildingId,selectedFloor,hoveredFl
       return;
     }
 
-    // Only after the building is already focused can a floor be selected.
+    // Only after the building is already focused can a real floor be selected.
+    // A click in the vertical gap between configured floors is intentionally ignored.
     const floor=floorAtWorldY(building,e.point.y,unitPerMeter,baseY);
-    if(floor)onSelectFloor?.(floor,building);
+    if(!floor)return;
+    onSelectFloor?.(floor,building);
   }
 
   return <group ref={groupRef} position={[Number(building.position_x)||0,baseY,Number(building.position_z)||0]} rotation={[info.rotation[0],info.rotation[1]+THREE.MathUtils.degToRad(Number(building.rotation_y_deg)||0),info.rotation[2]]} onPointerMove={hover} onPointerOver={hover} onPointerOut={e=>{e.stopPropagation();onLeave?.(building)}} onClick={click}>
@@ -234,14 +252,31 @@ function SharedComplex({url,cfg,buildings,selectedBuildingId,selectedFloor,hover
     if(!b){onLeave?.();return}
 
     const isActive=selectedBuildingId===b.id;
-    const floor=isActive
-      ? floorAtWorldY(b,e.point.y,unitPerMeter,Number(b.position_y)||0)
-      : null;
+
+    if(!isActive){
+      onHover?.({
+        building:b,
+        floor:null,
+        stage:'building',
+        clientX:e.nativeEvent?.clientX??0,
+        clientY:e.nativeEvent?.clientY??0
+      });
+      return;
+    }
+
+    // Once the building is selected, only a real floor range is hoverable.
+    // Gaps between floors are intentionally inert: no tooltip, no highlight,
+    // and clicking there cannot re-select the same building.
+    const floor=floorAtWorldY(b,e.point.y,unitPerMeter,Number(b.position_y)||0);
+    if(!floor){
+      onLeave?.();
+      return;
+    }
 
     onHover?.({
       building:b,
       floor,
-      stage:isActive?'floor':'building',
+      stage:'floor',
       clientX:e.nativeEvent?.clientX??0,
       clientY:e.nativeEvent?.clientY??0
     });
@@ -260,9 +295,11 @@ function SharedComplex({url,cfg,buildings,selectedBuildingId,selectedFloor,hover
       return;
     }
 
-    // Stage 2: only the already focused building exposes/selects floors.
+    // Stage 2: only a real floor band can be selected.
+    // Clicking a gap between floors does nothing.
     const floor=floorAtWorldY(b,e.point.y,unitPerMeter,Number(b.position_y)||0);
-    if(floor)onSelectFloor?.(floor,b);
+    if(!floor)return;
+    onSelectFloor?.(floor,b);
   }
 
   return <group ref={groupRef} rotation={info.rotation} onPointerMove={hover} onPointerOver={hover} onPointerOut={()=>onLeave?.()} onClick={click}>
@@ -374,34 +411,46 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
       desiredFov=selectedBuildingId?34:39;
       camera.up.set(0,0,-1);
     }else if(preset==='front'){
-      const distance=Math.max(span*(selectedBuildingId?2.0:2.0),3.2);
+      const distance=Math.max(span*(selectedBuildingId?2.0:1.9),3.2);
       dest=new THREE.Vector3(target.x,target.y+height*.06,target.z+distance);
-      desiredFov=selectedBuildingId?36:38;
+      desiredFov=selectedBuildingId?36:39;
       camera.up.set(0,1,0);
     }else{
       camera.up.set(0,1,0);
 
       if(selectedBuildingId){
-        // Looser hero framing: show the whole block in a pleasant perspective,
-        // not a very tight "nose in the balconies" close-up.
+        // 3/4 hero framing:
+        // keep the selected building fully visible, but NEVER approach it straight-on.
         let outward=new THREE.Vector3(center.x-sceneCenter.x,0,center.z-sceneCenter.z);
         if(outward.lengthSq()<.04){
-          outward=camera.position.clone().sub(target);outward.y=0;
+          outward=camera.position.clone().sub(target);
+          outward.y=0;
         }
         if(outward.lengthSq()<.04)outward.set(1,0,1);
         outward.normalize();
 
         const tangent=new THREE.Vector3(-outward.z,0,outward.x);
+
+        // Pick the tangent side that is closest to the camera's current azimuth,
+        // so the move stays cinematic and doesn't orbit unnecessarily around the block.
+        const currentDir=camera.position.clone().sub(target);
+        currentDir.y=0;
+        if(currentDir.lengthSq()<.001)currentDir.copy(outward);
+        currentDir.normalize();
+
+        const sideA=outward.clone().add(tangent.clone().multiplyScalar(.38)).normalize();
+        const sideB=outward.clone().add(tangent.clone().multiplyScalar(-.38)).normalize();
+        const heroDir=currentDir.dot(sideA)>=currentDir.dot(sideB)?sideA:sideB;
+
         const distance=Math.max(
-          Math.max(width,depth)*2.05,
-          height*1.10,
-          3.15
+          Math.max(width,depth)*1.88,
+          height*1.04,
+          3.0
         );
 
         dest=target.clone()
-          .add(outward.multiplyScalar(distance))
-          .add(tangent.multiplyScalar(distance*.10))
-          .add(new THREE.Vector3(0,height*.24,0));
+          .add(heroDir.multiplyScalar(distance))
+          .add(new THREE.Vector3(0,height*.22,0));
 
         desiredFov=36.5;
       }else{
@@ -412,16 +461,15 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
           1
         );
 
-        // Full-complex framing should feel composed, not extremely zoomed out.
-        // Keep the whole ensemble in view, but closer to the reference:
-        // slightly nearer camera, a bit lower, and a touch wider FOV.
-        const distance=sceneSpan*1.24+.85;
+        // Tighter complex overview:
+        // the ensemble should fill the frame instead of floating far away.
+        const distance=sceneSpan*1.06+.55;
         dest=new THREE.Vector3(
-          target.x+distance*.68,
-          target.y+distance*.31,
-          target.z+distance*.78
+          target.x+distance*.62,
+          target.y+distance*.27,
+          target.z+distance*.70
         );
-        desiredFov=40;
+        desiredFov=41.5;
       }
     }
 
