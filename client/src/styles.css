@@ -341,3 +341,40 @@ a.primary:hover,
   min-width:0;
   overflow:hidden;
 }
+
+
+/* 04.4.0 — PNG topology assisted detector */
+.topology-guided-help{
+  align-items:flex-start;
+}
+.topology-guided-help>span{
+  flex:1 1 420px;
+  line-height:1.45;
+}
+.seed-mode-switch{
+  display:flex;
+  gap:5px;
+}
+.seed-mode-switch button.active{
+  background:#101512;
+  color:#fff;
+  border-color:#101512;
+}
+.seed-mode-switch button.active.common{
+  background:#c83d45;
+  border-color:#c83d45;
+}
+.detector-preview .common-seed-dot{
+  fill:#c83d45;
+  stroke:#fff;
+  stroke-width:4;
+  vector-effect:non-scaling-stroke;
+}
+.detector-preview .common-seed-label{
+  fill:#c83d45;
+  font-size:28px;
+  font-weight:900;
+  paint-order:stroke;
+  stroke:#fff;
+  stroke-width:7px;
+}

@@ -1,34 +1,56 @@
-# Estate Studio — Build 04.3.0 PNG Workflow Restored
+# Estate Studio — Build 04.4.0 PNG Topology Guided
 
-Rollback complet al experimentelor DWG/CAD.
+Detector PNG optimizat pentru planurile tehnice curate, alb-negru, cu pereți groși,
+uși desenate și balcoane/terase — exact modelul folosit în proiect.
 
-## Bază
-Acest build pornește din `03.8.4-detector-runtime-rollback`, ultima ramură stabilă înainte de introducerea workflow-ului DWG.
+## Schimbarea principală
+Vechiul Mod asistat pornea de la connected-components. Dacă toate apartamentele comunicau
+prin uși cu holul comun, toate seed-urile ajungeau în aceeași componentă și detectorul
+vedea un singur apartament.
 
-## Ce rămâne
-- upload plan etaj ca PNG/JPG/WebP/SVG;
-- editor manual de poligoane;
-- mutare liberă a vertex-urilor;
-- pan/zoom stabil;
-- snap 0/90, 45°, vertices și `Snap edit`;
-- detectorul `Architectural V2` pentru imagini, fără OCR/Tesseract;
-- viewerul public și camera din ramura stabilă;
-- selecția `ansamblu → bloc → etaj → apartament`;
-- tooltip-uri și shade pentru blocurile inactive;
-- shared GLB și toate fixurile cumulative de dinainte de DWG.
+În 04.4.0 Mod asistat folosește **multi-source geodesic topology**:
 
-## Ce este eliminat
-- import DWG;
-- conversie DWG → SVG/DXF;
-- viewer CAD;
-- `CadPlanImporter`;
-- libredwg;
-- cad-simple-viewer;
-- orice buton sau workflow CAD în editorul de etaj.
+1. un seed pentru fiecare apartament;
+2. unul sau mai multe seed-uri `C` pentru holul / zona comună;
+3. exteriorul planșei este al treilea competitor;
+4. pereții sunt bariere;
+5. golurile reale de ușă rămân deschise;
+6. seed-ul apartamentului se propagă prin dormitor, living, baie, bucătărie etc.;
+7. seed-ul comun ocupă holul comun și oprește propagarea între apartamente;
+8. balcoanele sunt incluse dacă sunt accesibile din apartament și închise de contur;
+9. după segmentarea spațiului liber, grosimea pereților este împărțită până aproape de axa mediană.
 
-Documentația arhitecturală din admin acceptă acum doar PDF și imagini.
+## Wall mask pentru acest tip de plan
+Detectorul combină:
+- stroke-uri realmente groase (pereți);
+- stroke-uri arhitecturale lungi, chiar dacă sunt mai subțiri (fațade, balcoane);
+- mobilierul/textul rămân în mare parte insule locale și nu mai definesc apartamentul.
 
-`/api/version` => `04.3.0-png-workflow-restored`
+## UX Mod asistat
+- este activ implicit;
+- `Apartamente` → click câte unul în fiecare apartament;
+- `Zonă comună` → click unul sau mai multe puncte în holul comun/casa scării;
+- punctele comune apar roșu `C1`, `C2` etc.;
+- dacă holul are ramuri, poți pune mai multe puncte C;
+- regenerezi fără să redesenezi manual contururile.
+
+## Editor manual
+Rămân fixurile stabile:
+- vertex-uri libere implicit;
+- `Snap edit` separat;
+- viewport blocat în timpul mutării unui punct;
+- pan limitat, fără aruncarea planului în afara ecranului.
+
+## Fără CAD
+Nu există DWG/DXF, LibreDWG, cad-simple-viewer sau CadPlanImporter.
+
+`/api/version` => `04.4.0-png-topology-guided`
+
+# Estate Studio — 04.3.1 Hard PNG Rollback
+
+This is a full snapshot of 03.8.4, before DWG/CAD work. A preinstall guard forcibly deletes CAD leftovers and rewrites the client dependencies/Vite config to PNG-only before Render installs the client.
+
+`/api/version` => `04.3.1-hard-png-rollback`
 
 # Estate Studio — Build 03.8.4 Detector Runtime Rollback
 
@@ -595,4 +617,4 @@ Fiecare proiect primește viewer public separat: `/embed/:slug` și cod iframe g
 - documentație arhitecturală stocată per proiect
 
 ## Notă despre generarea 3D din planuri
-Build-ul include modul de proiect `Documentație arhitecturală` pentru PDF și imagini. Fluxul GLB/GLTF rămâne complet funcțional.
+Build-ul include modul de proiect `Documentație arhitecturală`, uploadurile și stocarea documentației. Generarea automată a unei geometrii comerciale detaliate din PDF/DWG necesită un motor extern de modelare/AI/CAD; build-ul nu pretinde că inventează acea geometrie în lipsa unui astfel de motor. Fluxul GLB/GLTF este complet funcțional.

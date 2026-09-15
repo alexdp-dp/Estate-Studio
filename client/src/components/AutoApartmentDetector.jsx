@@ -435,6 +435,269 @@ function contourForLabel(labelMap,target,w,h){
   return polygon.map(([x,y])=>({x:clamp(x/w,0,1),y:clamp(y/h,0,1)}));
 }
 
+
+function morphErodePasses(src,w,h,passes=1){
+  let cur=src;
+  for(let i=0;i<passes;i++)cur=morphErode(cur,w,h);
+  return cur;
+}
+
+function morphDilatePasses(src,w,h,passes=1){
+  let cur=src;
+  for(let i=0;i<passes;i++)cur=morphDilate(cur,w,h);
+  return cur;
+}
+
+function buildGuidedWallMask(dark,w,h){
+  const base=Math.min(w,h);
+
+  // The target plans use thick black apartment/common walls and thinner
+  // furniture / symbols / internal detail. Keep both:
+  // 1) truly thick strokes;
+  // 2) long architectural strokes, even if they are thin (balconies, façade lines).
+  let thick=morphErodePasses(dark,w,h,1);
+  thick=morphDilatePasses(thick,w,h,2);
+
+  const minRun=Math.max(7,Math.round(base*.010));
+  let long=keepLongRuns(dark,w,h,minRun);
+  long=morphDilatePasses(long,w,h,1);
+
+  const wall=new Uint8Array(dark.length);
+  for(let i=0;i<wall.length;i++)wall[i]=(thick[i]||long[i])?1:0;
+
+  // Close anti-alias pinholes only. Door openings remain open, because the
+  // guided geodesic partition needs to travel through real doors.
+  return morphDilatePasses(morphErode(morphDilate(wall,w,h),w,h),w,h,1);
+}
+
+function nearestFreePoint(free,w,h,nx,ny,maxRadius=20){
+  const x=clamp(Math.round(nx*(w-1)),0,w-1);
+  const y=clamp(Math.round(ny*(h-1)),0,h-1);
+  if(free[y*w+x])return {x,y};
+
+  for(let r=1;r<=maxRadius;r++){
+    const x0=Math.max(0,x-r),x1=Math.min(w-1,x+r);
+    const y0=Math.max(0,y-r),y1=Math.min(h-1,y+r);
+
+    for(let xx=x0;xx<=x1;xx++){
+      if(free[y0*w+xx])return {x:xx,y:y0};
+      if(free[y1*w+xx])return {x:xx,y:y1};
+    }
+    for(let yy=y0+1;yy<y1;yy++){
+      if(free[yy*w+x0])return {x:x0,y:yy};
+      if(free[yy*w+x1])return {x:x1,y:yy};
+    }
+  }
+  return null;
+}
+
+function fillGuidedFreeSpace(free,w,h,apartmentSeeds,commonSeeds){
+  const N=w*h;
+  const labels=new Int16Array(N);
+  const queue=new Int32Array(N);
+  let head=0,tail=0;
+
+  function seedPoint(p,label){
+    const found=nearestFreePoint(free,w,h,p.x,p.y,24);
+    if(!found)return false;
+    const i=found.y*w+found.x;
+    if(labels[i]===0){
+      labels[i]=label;
+      queue[tail++]=i;
+    }
+    return true;
+  }
+
+  // Apartment/common seeds are inserted first so they win exact-distance ties.
+  apartmentSeeds.forEach((p,i)=>seedPoint(p,i+1));
+  commonSeeds.forEach(p=>seedPoint(p,-1));
+
+  // Exterior is another competitor. This keeps terraces/balconies bounded by
+  // their real outline instead of allowing apartment fill to escape into the page.
+  for(let x=0;x<w;x++){
+    const top=x,bottom=(h-1)*w+x;
+    if(free[top]&&!labels[top]){labels[top]=-2;queue[tail++]=top}
+    if(free[bottom]&&!labels[bottom]){labels[bottom]=-2;queue[tail++]=bottom}
+  }
+  for(let y=1;y<h-1;y++){
+    const left=y*w,right=y*w+w-1;
+    if(free[left]&&!labels[left]){labels[left]=-2;queue[tail++]=left}
+    if(free[right]&&!labels[right]){labels[right]=-2;queue[tail++]=right}
+  }
+
+  while(head<tail){
+    const i=queue[head++],label=labels[i];
+    const y=Math.floor(i/w),x=i-y*w;
+
+    if(y>0){
+      const n=i-w;
+      if(free[n]&&!labels[n]){labels[n]=label;queue[tail++]=n}
+    }
+    if(x>0){
+      const n=i-1;
+      if(free[n]&&!labels[n]){labels[n]=label;queue[tail++]=n}
+    }
+    if(x<w-1){
+      const n=i+1;
+      if(free[n]&&!labels[n]){labels[n]=label;queue[tail++]=n}
+    }
+    if(y<h-1){
+      const n=i+w;
+      if(free[n]&&!labels[n]){labels[n]=label;queue[tail++]=n}
+    }
+  }
+
+  return labels;
+}
+
+function splitWallToMidline(freeLabels,wall,w,h){
+  const N=w*h;
+  const out=new Int16Array(freeLabels);
+  const queue=new Int32Array(N);
+  let head=0,tail=0;
+
+  // Multi-source BFS from every labelled free-space pixel, but expansion is
+  // allowed ONLY inside wall pixels. Adjacent regions therefore meet around the
+  // middle of the wall thickness.
+  for(let i=0;i<N;i++){
+    if(freeLabels[i]!==0)queue[tail++]=i;
+  }
+
+  while(head<tail){
+    const i=queue[head++],label=out[i];
+    const y=Math.floor(i/w),x=i-y*w;
+
+    if(y>0){
+      const n=i-w;
+      if(wall[n]&&out[n]===0){out[n]=label;queue[tail++]=n}
+    }
+    if(x>0){
+      const n=i-1;
+      if(wall[n]&&out[n]===0){out[n]=label;queue[tail++]=n}
+    }
+    if(x<w-1){
+      const n=i+1;
+      if(wall[n]&&out[n]===0){out[n]=label;queue[tail++]=n}
+    }
+    if(y<h-1){
+      const n=i+w;
+      if(wall[n]&&out[n]===0){out[n]=label;queue[tail++]=n}
+    }
+  }
+
+  return out;
+}
+
+function topologyGuidedScore(result,seedCount){
+  if(!result?.detections?.length)return -1e9;
+
+  const exact=result.detections.length===seedCount?1200:0;
+  const ratios=result.detections.map(d=>d.area/Math.max(1,result.opaqueCount));
+  const minRatio=Math.min(...ratios);
+  const maxRatio=Math.max(...ratios);
+  const plausibleMin=minRatio>.004?120:-100;
+  const plausibleMax=maxRatio<.38?80:-120;
+  const common=result.commonArea/result.opaqueCount>.006?90:0;
+  const wallRatio=result.wallPixels/Math.max(1,result.opaqueCount);
+  const wallPlausible=wallRatio>.015&&wallRatio<.34?80:-80;
+
+  return exact+result.detections.length*25+plausibleMin+plausibleMax+common+wallPlausible;
+}
+
+function analyzeGuidedTopology(imageData,w,h,threshold,apartmentSeeds,commonSeeds){
+  const d=imageData.data,N=w*h;
+  const opaque=new Uint8Array(N),dark=new Uint8Array(N);
+  let opaqueCount=0;
+
+  for(let i=0,p=0;i<N;i++,p+=4){
+    if(d[p+3]<=48)continue;
+    opaque[i]=1;opaqueCount++;
+
+    const gray=.299*d[p]+.587*d[p+1]+.114*d[p+2];
+    if(gray<threshold)dark[i]=1;
+  }
+
+  const wall=buildGuidedWallMask(dark,w,h);
+  const free=new Uint8Array(N);
+  let wallPixels=0;
+  for(let i=0;i<N;i++){
+    if(wall[i])wallPixels++;
+    free[i]=opaque[i]&&!wall[i]?1:0;
+  }
+
+  const freeLabels=fillGuidedFreeSpace(
+    free,w,h,
+    apartmentSeeds||[],
+    commonSeeds||[]
+  );
+
+  const finalLabels=splitWallToMidline(freeLabels,wall,w,h);
+
+  const detections=[];
+  for(let label=1;label<=(apartmentSeeds||[]).length;label++){
+    let area=0,sumX=0,sumY=0;
+    for(let i=0;i<N;i++){
+      if(finalLabels[i]!==label)continue;
+      area++;
+      const y=Math.floor(i/w),x=i-y*w;
+      sumX+=x;sumY+=y;
+    }
+    if(area<Math.max(90,N*.00035))continue;
+
+    const points=contourForLabel(finalLabels,label,w,h);
+    if(points.length<4)continue;
+
+    detections.push({
+      componentId:`topology-${label}`,
+      seedIndex:label-1,
+      points,
+      confidence:.96,
+      area,
+      cx:(sumX/area)/w,
+      cy:(sumY/area)/h
+    });
+  }
+
+  detections.sort((a,b)=>a.seedIndex-b.seedIndex);
+
+  let commonArea=0;
+  for(let i=0;i<N;i++)if(freeLabels[i]===-1)commonArea++;
+
+  let commonPoints=[];
+  if(commonArea){
+    const commonOnly=new Int16Array(N);
+    for(let i=0;i<N;i++)if(finalLabels[i]===-1)commonOnly[i]=1;
+    commonPoints=contourForLabel(commonOnly,1,w,h);
+  }
+
+  return {
+    detections,
+    initialCandidates:[],
+    excludedIds:new Set(),
+    likelyCore:commonPoints.length>3
+      ? {id:'guided-common',area:commonArea,points:commonPoints}
+      : null,
+    threshold,
+    expected:(apartmentSeeds||[]).length,
+    opaqueCount,
+    wallPixels,
+    commonArea,
+    width:w,
+    height:h,
+    topologyGuided:true
+  };
+}
+
+function analyzeGuidedAuto(imageData,w,h,apartmentSeeds,commonSeeds){
+  let best=null,bestScore=-1e9;
+  for(const t of [75,85,95,105,115,125,135,145]){
+    const r=analyzeGuidedTopology(imageData,w,h,t,apartmentSeeds,commonSeeds);
+    const score=topologyGuidedScore(r,apartmentSeeds.length);
+    if(score>bestScore){best=r;bestScore=score}
+  }
+  return best;
+}
+
 function analyzePixels(imageData,w,h,threshold,expected,excludedIds=new Set(),seedPoints=[]){
   const d=imageData.data,N=w*h;
   const opaque=new Uint8Array(N),dark=new Uint8Array(N);
@@ -601,13 +864,13 @@ function analyzeAuto(imageData,w,h,expected,excludedIds=new Set(),seedPoints=[])
   return best;
 }
 
-async function loadPlan(url,maxDim=1400){
+async function loadPlan(url,maxDim=1650){
   const r=await fetch(url,{mode:'cors'});
   if(!r.ok)throw new Error(`Nu pot încărca planul (${r.status}).`);
   const blob=await r.blob();
   const bmp=await createImageBitmap(blob);
   const byDim=Math.min(1,maxDim/Math.max(bmp.width,bmp.height));
-  const byPixels=Math.min(1,Math.sqrt(1800000/Math.max(1,bmp.width*bmp.height)));
+  const byPixels=Math.min(1,Math.sqrt(2400000/Math.max(1,bmp.width*bmp.height)));
   const scale=Math.min(byDim,byPixels);
   const w=Math.max(1,Math.round(bmp.width*scale)),h=Math.max(1,Math.round(bmp.height*scale));
   const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
@@ -625,8 +888,10 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
   const [expected,setExpected]=useState('');
   const [threshold,setThreshold]=useState(95);
   const [autoThreshold,setAutoThreshold]=useState(true);
-  const [guided,setGuided]=useState(false);
+  const [guided,setGuided]=useState(true);
   const [seeds,setSeeds]=useState([]);
+  const [commonSeeds,setCommonSeeds]=useState([]);
+  const [seedMode,setSeedMode]=useState('apartments');
   const [aspect,setAspect]=useState(1);
   const [busy,setBusy]=useState(false);
   const [raw,setRaw]=useState(null);
@@ -660,9 +925,17 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     try{
       const loaded=raw||await loadPlan(floor.plan_path);
       if(!raw)setRaw(loaded);
-      const r=autoThreshold
-        ? analyzeAuto(loaded.imageData,loaded.w,loaded.h,expected,new Set(),guided?seeds:[])
-        : analyzePixels(loaded.imageData,loaded.w,loaded.h,Number(threshold)||95,expected,new Set(),guided?seeds:[]);
+      if(guided&&(!seeds.length||!commonSeeds.length)){
+        throw new Error('În Mod asistat pune cel puțin un punct în fiecare apartament și cel puțin un punct în holul / zona comună.');
+      }
+
+      const r=guided
+        ? (autoThreshold
+            ? analyzeGuidedAuto(loaded.imageData,loaded.w,loaded.h,seeds,commonSeeds)
+            : analyzeGuidedTopology(loaded.imageData,loaded.w,loaded.h,Number(threshold)||105,seeds,commonSeeds))
+        : (autoThreshold
+            ? analyzeAuto(loaded.imageData,loaded.w,loaded.h,expected,new Set(),[])
+            : analyzePixels(loaded.imageData,loaded.w,loaded.h,Number(threshold)||95,expected,new Set(),[]));
       setExcluded(new Set());
       setResult(r);
       if(r?.threshold)setThreshold(r.threshold);
@@ -676,16 +949,24 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
 
   function recompute(nextExcluded){
     if(!raw)return;
-    const r=autoThreshold
-      ? analyzeAuto(raw.imageData,raw.w,raw.h,expected,nextExcluded,guided?seeds:[])
-      : analyzePixels(raw.imageData,raw.w,raw.h,Number(threshold)||95,expected,nextExcluded,guided?seeds:[]);
-    setExcluded(nextExcluded);setResult(r);
+    const r=guided
+      ? (autoThreshold
+          ? analyzeGuidedAuto(raw.imageData,raw.w,raw.h,seeds,commonSeeds)
+          : analyzeGuidedTopology(raw.imageData,raw.w,raw.h,Number(threshold)||105,seeds,commonSeeds))
+      : (autoThreshold
+          ? analyzeAuto(raw.imageData,raw.w,raw.h,expected,nextExcluded,[])
+          : analyzePixels(raw.imageData,raw.w,raw.h,Number(threshold)||95,expected,nextExcluded,[]));
+    setExcluded(guided?new Set():nextExcluded);setResult(r);
     const m={};
     r.detections.forEach((d,i)=>{m[i]=existing[i]?.id||'new'});
     setMapping(m);
   }
 
   function markCommon(componentId){
+    if(guided){
+      setMessage('În Mod asistat zona comună este cea marcată cu punctele C. Mută / adaugă acele puncte dacă holul comun nu este corect.');
+      return;
+    }
     const next=new Set(excluded);
     if(next.has(componentId))next.delete(componentId);else next.add(componentId);
     recompute(next);
@@ -697,11 +978,19 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     const x=clamp((e.clientX-r.left)/r.width,0,1);
     const y=clamp((e.clientY-r.top)/r.height,0,1);
 
-    setSeeds(v=>{
-      const hit=v.findIndex(p=>Math.hypot(p.x-x,p.y-y)<.035);
-      if(hit>=0)return v.filter((_,i)=>i!==hit);
-      return [...v,{x,y}];
-    });
+    if(seedMode==='common'){
+      setCommonSeeds(v=>{
+        const hit=v.findIndex(p=>Math.hypot(p.x-x,p.y-y)<.035);
+        if(hit>=0)return v.filter((_,i)=>i!==hit);
+        return [...v,{x,y}];
+      });
+    }else{
+      setSeeds(v=>{
+        const hit=v.findIndex(p=>Math.hypot(p.x-x,p.y-y)<.035);
+        if(hit>=0)return v.filter((_,i)=>i!==hit);
+        return [...v,{x,y}];
+      });
+    }
     setResult(null);
   }
 
@@ -739,7 +1028,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     <div className="modal-card auto-detector-card">
       <button className="x" onClick={onClose}>×</button>
       <div className="auto-head">
-        <div><small>AUTO-DETECT · ARCHITECTURAL V2</small><h2>Detectează apartamentele</h2><p>Detectorul reconstruiește pereții ca geometrie arhitecturală, ignoră mare parte din mobilier și produce contururi din segmente drepte, cu limite comune pe axa mediană a pereților.</p></div>
+        <div><small>PNG TOPOLOGY · V3</small><h2>Detectează apartamentele</h2><p>Optimizat pentru planuri tehnice curate ca al tău: pereții sunt bariere, ușile rămân treceri, iar holul comun concurează cu fiecare apartament. Astfel toate camerele conectate prin uși rămân în același apartament.</p></div>
       </div>
 
       <div className="detector-settings detector-settings-v2">
@@ -759,6 +1048,8 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
             const next=e.target.checked;
             setGuided(next);
             setSeeds([]);
+            setCommonSeeds([]);
+            setSeedMode('apartments');
             setResult(null);
             setExcluded(new Set());
             setMessage('');
@@ -768,18 +1059,26 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         {!guided&&<button className="primary" disabled={busy} onClick={run}>{busy?'Analizez…':'Analizează planul'}</button>}
       </div>
 
-      {guided&&<div className="guided-help">
-        <b>Mod asistat:</b> planul apare imediat mai jos. Click o dată în fiecare apartament. Click din nou lângă un punct ca să-l ștergi.
-        <button onClick={()=>{setSeeds([]);setResult(null)}}>Șterge punctele</button>
+      {guided&&<div className="guided-help topology-guided-help">
+        <b>Mod asistat Topology:</b>
+        <span>1) pune câte un punct în fiecare apartament; 2) schimbă pe „Zonă comună” și pune cel puțin un punct în holul comun / casa scării. Poți pune mai multe puncte comune dacă holul are ramuri.</span>
+        <div className="seed-mode-switch">
+          <button className={seedMode==='apartments'?'active':''} onClick={()=>setSeedMode('apartments')}>Apartamente</button>
+          <button className={seedMode==='common'?'active common':''} onClick={()=>setSeedMode('common')}>Zonă comună</button>
+        </div>
+        <button onClick={()=>{setSeeds([]);setCommonSeeds([]);setResult(null)}}>Șterge toate punctele</button>
       </div>}
 
       {guided&&!result&&<div className="guided-stage">
         <div className="guided-stage-head">
           <div>
-            <b>1. Marchează apartamentele</b>
-            <span>Dă câte un click aproximativ în centrul fiecărui apartament. Nu trebuie să nimerești perfect și nu trebuie să trasezi conturul.</span>
+            <b>{seedMode==='apartments'?'1. Marchează apartamentele':'2. Marchează zona comună'}</b>
+            <span>{seedMode==='apartments'
+              ? 'Dă câte un click aproximativ în fiecare apartament. Camerele lui se vor uni prin ușile interioare.'
+              : 'Dă unul sau mai multe clickuri în holul comun / casa scării. Zona comună oprește un apartament să se verse în celelalte.'
+            }</span>
           </div>
-          <strong>{seeds.length} puncte</strong>
+          <strong>{seeds.length} ap. · {commonSeeds.length} comun</strong>
         </div>
         <div className="detector-preview guided" style={{aspectRatio:aspect||1}} onClick={addSeed}>
           <img
@@ -792,24 +1091,34 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
               <circle cx={p.x*1000} cy={p.y*1000} r="11" className="seed-dot"/>
               <text x={p.x*1000+16} y={p.y*1000-16} className="seed-label">{i+1}</text>
             </g>)}
+            {commonSeeds.map((p,i)=><g key={'commonpre'+i}>
+              <circle cx={p.x*1000} cy={p.y*1000} r="12" className="common-seed-dot"/>
+              <text x={p.x*1000+16} y={p.y*1000-16} className="common-seed-label">C{i+1}</text>
+            </g>)}
           </svg>
         </div>
         <div className="guided-stage-actions">
-          <small>După ce ai câte un punct în fiecare apartament, apasă „Generează din {seeds.length} puncte”.</small>
-          <button disabled={!seeds.length||busy} className="primary" onClick={run}>
-            {busy?'Analizez…':`Generează din ${seeds.length} puncte`}
+          <small>
+            {commonSeeds.length
+              ? `Gata pentru analiză: ${seeds.length} apartamente + ${commonSeeds.length} puncte comune.`
+              : 'Mai trebuie cel puțin un punct în zona comună.'
+            }
+          </small>
+          <button disabled={!seeds.length||!commonSeeds.length||busy} className="primary" onClick={run}>
+            {busy?'Analizez topologia…':`Generează ${seeds.length} apartamente`}
           </button>
         </div>
       </div>}
 
       {!result&&!guided&&<div className="detector-intro">
         <b>Ce face detectorul</b>
-        <span>• caută întâi trasee lungi de perete, nu orice pixel întunecat;</span>
-        <span>• mobilierul, textele și detaliile mici sunt filtrate înainte de segmentare;</span>
-        <span>• golurile mici din pereți (uși / antialiasing) sunt reconectate controlat;</span>
-        <span>• limitele dintre apartamente sunt împinse spre axa mediană a pereților comuni;</span>
-        <span>• conturul final este reconstruit din segmente arhitecturale 0° / 45° / 90° / 135° și muchii lungi reale;</span>
-        <span>• în Mod asistat dai doar câte un click în fiecare apartament; detectorul construiește singur contururile;</span>
+        <span>• Mod asistat Topology este varianta recomandată pentru planurile tehnice alb-negru;</span>
+        <span>• pereții rămân bariere, iar golurile reale de ușă rămân deschise;</span>
+        <span>• fiecare seed de apartament se propagă prin toate camerele conectate prin uși;</span>
+        <span>• seed-ul de hol comun blochează propagarea spre vecini;</span>
+        <span>• exteriorul planșei este tratat ca o a treia zonă concurentă, ca să nu „curgă” poligoanele în afara clădirii;</span>
+        <span>• balcoanele/terasele sunt incluse dacă sunt închise de contur și accesibile din apartament;</span>
+        <span>• pereții comuni sunt împărțiți aproximativ pe axa mediană;</span>
         <span>• nimic nu se salvează până nu confirmi propunerile.</span>
       </div>}
 
@@ -817,8 +1126,11 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         <div className="detector-summary">
           <b>{result.detections.length} apartamente propuse</b>
           <span>{coreText}</span>
-          <small>Architectural V2 · {result.width}×{result.height}px analiză · prag {result.threshold}{guided?` · ${seeds.length} puncte-ghid`:''}</small>
-          <small>Poți marca o propunere drept „zonă comună” și detectorul recalculează limitele.</small>
+          <small>{result.topologyGuided?'PNG Topology V3':'Architectural V2'} · {result.width}×{result.height}px analiză · prag {result.threshold}{guided?` · ${seeds.length} apartamente · ${commonSeeds.length} puncte comune`:''}</small>
+          <small>{guided
+            ? 'Dacă o limită intră în hol, mută sau mai adaugă un punct C în acea ramură a zonei comune și regenerează.'
+            : 'Poți marca o propunere drept „zonă comună” și detectorul recalculează limitele.'
+          }</small>
         </div>
 
         <div className={'detector-preview '+(guided?'guided':'')} style={{aspectRatio:aspect||1}} onClick={addSeed}>
@@ -834,6 +1146,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
               style={{fill:colors[i%colors.length]+'66',stroke:colors[i%colors.length]}}
             />)}
             {seeds.map((p,i)=><g key={'seed'+i}><circle cx={p.x*1000} cy={p.y*1000} r="10" className="seed-dot"/><text x={p.x*1000+14} y={p.y*1000-14} className="seed-label">{i+1}</text></g>)}
+            {commonSeeds.map((p,i)=><g key={'common'+i}><circle cx={p.x*1000} cy={p.y*1000} r="11" className="common-seed-dot"/><text x={p.x*1000+14} y={p.y*1000-14} className="common-seed-label">C{i+1}</text></g>)}
           </svg>
         </div>
 
@@ -845,7 +1158,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
               <option value="new">Creează apartament nou</option>
               {existing.map(a=><option key={a.id} value={a.id}>{a.code} · {statusLabel[a.status]}</option>)}
             </select>
-            <button onClick={()=>markCommon(d.componentId)}>Nu e apartament</button>
+            {!guided&&<button onClick={()=>markCommon(d.componentId)}>Nu e apartament</button>}
           </div>)}
         </div>
 
