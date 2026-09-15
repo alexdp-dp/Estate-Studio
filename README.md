@@ -1,3 +1,25 @@
+# Estate Studio — Build 04.2.1 Three Peer Dependency Fix
+
+Hotfix pentru eroarea de build Render:
+
+`peer three@"^0.172.0" from @mlightcad/mtext-renderer@0.12.8`
+
+## Cauza exactă
+Buildul 04.2.0 avea:
+- `three`: `^0.169.0`
+- `@mlightcad/cad-simple-viewer`: `^1.7.0`
+
+`cad-simple-viewer` trage `@mlightcad/mtext-renderer@0.12.8`, iar acesta cere `three ^0.172.0`.
+
+## Fix
+- `three` actualizat la `^0.172.0`;
+- override explicit pentru `three ^0.172.0`;
+- NU folosim `--force`;
+- NU folosim `--legacy-peer-deps`;
+- restul buildului 04.2.0 rămâne neschimbat.
+
+`/api/version` => `04.2.1-three-peer-dependency-fix`
+
 # Estate Studio — Build 04.2.0 Real CAD Viewer + Door Graph
 
 Două corecții majore față de 04.1.0.
