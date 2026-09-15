@@ -1,3 +1,28 @@
+# Estate Studio — Build 04.4.11 Editor Real Interactions
+
+Fix concentrat exclusiv pe problema raportată în 04.4.10: mesajele de UI apăreau, dar geometria nu se modifica vizibil.
+
+## Drag vertex
+- drag-ul nu mai citește poziția din pointer + transform invers;
+- folosește direct coordonata locală reală a `Circle`-ului Konva (`e.target.x()/y()`);
+- node-ul este mutat imediat în `onDragMove`, apoi aceeași poziție este copiată în React state;
+- planul, celelalte poligoane și line-ul selectat au `listening=false`, astfel încât vertex-urile sunt singurele hit targets în modul de editare;
+- hit-area vertex-ului este mai mare.
+
+## Ștergere vertex
+04.4.10 putea șterge punctul și apoi îl recrea în exact aceeași poziție ca „elbow” ortogonal, deci vizual părea că nu se întâmplă nimic.
+
+04.4.11:
+- punctul selectat este eliminat efectiv;
+- dacă vecinii împart deja X sau Y, sunt uniți direct;
+- dacă ar rezulta o diagonală, este mutat minim unul dintre cei doi vecini ca să creeze o închidere la 90°;
+- punctul eliminat NU poate fi recreat în aceeași poziție;
+- mesajul confirmă și numărul vechi → nou de puncte.
+
+Viewerul public `multiply`, detectorul și restul funcțiilor 04.4.x sunt păstrate.
+
+`/api/version` => `04.4.11-editor-real-interactions`
+
 # Estate Studio — Build 04.4.10 Editor Syntax Hotfix
 
 Hotfix exact pentru eroarea de build din 04.4.9.
