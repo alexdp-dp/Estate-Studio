@@ -277,54 +277,125 @@ function makePlanSvg(geometry,width=2000){
   return {text:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" preserveAspectRatio="none"><rect width="100%" height="100%" fill="white"/><g fill="none" stroke="#222" stroke-width="1.2" vector-effect="non-scaling-stroke">${lines}</g><g fill="#444" font-family="Arial,sans-serif" font-size="9">${labels}</g></svg>`,width,height};
 }
 
-function CadTrueViewer({dxfBytes,onReady,onError}){
+function CadTrueViewer({dxfBytes,onReady,onError,background='dark'}){
   const hostRef=useRef(null);
 
   useEffect(()=>{
     let dead=false;
     let localManager=null;
+    let timer=null;
 
     (async()=>{
       try{
         const {AcApDocManager}=await import('@mlightcad/cad-simple-viewer');
+
         if(activeCadViewer){
           try{activeCadViewer.destroy?.()}catch{}
           activeCadViewer=null;
         }
 
+        const workerUrls={
+          mtextRender:'/assets/mtext-renderer-worker.js',
+          dxfParser:'/assets/dxf-parser-worker.js'
+        };
+
+        // On recent cad-simple-viewer versions the worker readiness check gives a
+        // much clearer failure than a blank canvas.
+        if(typeof AcApDocManager.checkWebworkerReadiness==='function'){
+          const ready=await AcApDocManager.checkWebworkerReadiness(workerUrls);
+          if(!ready){
+            throw new Error('Worker-ele CAD nu sunt disponibile pe server (DXF/MTEXT).');
+          }
+        }
+
         const created=AcApDocManager.createInstance({
           container:hostRef.current,
+          busyIndicatorHost:hostRef.current,
+          autoResize:true,
           baseUrl:'/',
-          webworkerFileUrls:{mtextRender:'/assets/mtext-renderer-worker.js'}
+          webworkerFileUrls:workerUrls,
+          checkWorkersOnInit:true
         });
+
         localManager=created||AcApDocManager.instance;
         activeCadViewer=localManager;
 
-        const ok=await localManager.openDocument('estate-studio-preview.dxf',arrayBufferOf(dxfBytes),{
-          minimumChunkSize:1200,
-          readOnly:true
-        });
+        if(typeof localManager.areWorkersReady==='function'){
+          const ready=await localManager.areWorkersReady();
+          if(!ready)throw new Error('Viewerul CAD nu poate porni worker-ele DXF.');
+        }
+
+        const ok=await localManager.openDocument(
+          'estate-studio-preview.dxf',
+          arrayBufferOf(dxfBytes),
+          {minimumChunkSize:1000,readOnly:true}
+        );
+
         if(!ok)throw new Error('Viewerul CAD nu a putut deschide DXF-ul intermediar.');
         if(dead)return;
 
-        try{localManager.curView.backgroundColor=0xffffff}catch{}
-        try{localManager.curView.zoomToFitDrawing(12000)}catch{}
-        setTimeout(()=>{if(!dead)onReady?.(localManager)},350);
+        // IMPORTANT: CAD color 7 is commonly white. A white canvas can therefore
+        // look completely blank even when the drawing rendered correctly.
+        try{
+          localManager.curView.backgroundColor=
+            background==='light'?0xf4f6f5:0x101718;
+        }catch{}
+
+        const started=performance.now();
+
+        const finishWhenRendered=()=>{
+          if(dead)return;
+
+          const view=localManager.curView;
+          const stillProcessing=!!view?.isProcessingEntities;
+          const timedOut=performance.now()-started>30000;
+
+          if(stillProcessing&&!timedOut){
+            timer=setTimeout(finishWhenRendered,180);
+            return;
+          }
+
+          try{view?.zoomToFitDrawing?.(30000)}catch{}
+
+          // Give zoomToFitDrawing a moment to apply after progressive rendering.
+          timer=setTimeout(()=>{
+            if(dead)return;
+
+            let entityCount=null;
+            try{
+              entityCount=localManager.curDocument?.database?.entityCount??null;
+            }catch{}
+
+            let missed=null;
+            try{missed=view?.missedData||null}catch{}
+
+            onReady?.(localManager,{
+              entityCount,
+              missed,
+              processing:!!view?.isProcessingEntities,
+              timedOut
+            });
+          },500);
+        };
+
+        finishWhenRendered();
       }catch(e){
-        console.error(e);if(!dead)onError?.(e);
+        console.error(e);
+        if(!dead)onError?.(e);
       }
     })();
 
     return ()=>{
       dead=true;
+      if(timer)clearTimeout(timer);
       if(localManager&&activeCadViewer===localManager){
         try{localManager.destroy?.()}catch{}
         activeCadViewer=null;
       }
     };
-  },[dxfBytes]);
+  },[dxfBytes,background]);
 
-  return <div ref={hostRef} className="cad-true-viewer"/>;
+  return <div ref={hostRef} className={`cad-true-viewer ${background==='light'?'light':'dark'}`}/>;
 }
 
 function bboxValues(box){
@@ -363,6 +434,8 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
   const [mapping,setMapping]=useState(null);
   const [mapPreview,setMapPreview]=useState('');
   const [showWalls,setShowWalls]=useState(false);
+  const [cadBackground,setCadBackground]=useState('dark');
+  const [viewerInfo,setViewerInfo]=useState(null);
 
   const sourceName=useMemo(()=>floor?.settings?.cad?.source_file||null,[floor?.settings]);
 
@@ -375,17 +448,26 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
       if(!/\.dwg$/i.test(file.name))throw new Error('Alege un fișier .DWG.');
       const dxfBytes=await dwgToDxf(file,setStage);
       setPrepared({dxfBytes});
+      setViewerInfo(null);
       setSelecting(false);setCropWorld(null);setScreenCrop(null);setGeometry(null);setMapping(null);
       setStage('Viewer CAD real pregătit. Poți face zoom/pan și apoi selecta planul etajului.');
     }catch(e){console.error(e);setError(e.message||String(e));setStage('')}
     finally{setBusy(false)}
   }
 
-  function viewerReady(mgr){
+  function viewerReady(mgr,info){
     setViewer(mgr);
+    setViewerInfo(info||null);
+
     const b=mgr?.curView?.bbox;
     setViewerBbox(b||null);
-    setStage('DWG afișat prin renderer CAD. Folosește zoom/pan, apoi „Selectează etajul”.');
+
+    const xrefs=info?.missed?.xrefs||[];
+    if(xrefs.length){
+      setStage(`Desen încărcat, dar lipsesc ${xrefs.length} XREF-uri externe. Pereții pot fi într-un XREF și nu pot apărea fără fișierul referit.`);
+    }else{
+      setStage(`Desen CAD randat${Number.isFinite(info?.entityCount)?` · ${info.entityCount.toLocaleString('ro-RO')} entități`:''}.`);
+    }
   }
 
   function localPoint(e){
@@ -498,8 +580,8 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
   return <div className="modal">
     <div className="modal-card cad-import-modal cad-crop-modal cad-real-modal">
       <button className="x" onClick={onClose} disabled={busy}>×</button>
-      <small className="kicker">CAD FLOOR WORKFLOW · REAL DXF VIEWER</small>
-      <h2>{prepared?'Selectează etajul și mapează apartamentele':'Importă DWG'}</h2>
+      <small className="kicker">CAD FLOOR WORKFLOW · DISPLAY FIRST</small>
+      <h2>{prepared?'Verifică afișarea DWG-ului':'Importă DWG'}</h2>
 
       {!prepared&&<>
         <p>DWG-ul este convertit intern în DXF și afișat cu un renderer CAD adevărat, nu cu vechiul SVG LibreDWG. Asta păstrează mult mai bine pereții, blocurile, hatch-urile și planurile mari.</p>
@@ -513,17 +595,38 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
 
       {prepared&&<>
         <div className="cad-real-toolbar">
-          <button onClick={()=>{try{viewer?.curView?.zoomToFitDrawing?.(10000)}catch{}}}>Încadrează tot</button>
-          <button className={selecting?'active primary':''} onClick={()=>{setSelecting(v=>!v);setScreenCrop(null);setDragStart(null)}}>{selecting?'Trage dreptunghiul…':'Selectează etajul'}</button>
+          <button onClick={()=>{
+            try{
+              viewer?.curView?.zoomToFitDrawing?.(30000);
+              setTimeout(()=>viewer?.curView?.zoomToFitDrawing?.(30000),700);
+            }catch{}
+          }}>Încadrează desenul</button>
+
+          <button onClick={()=>setCadBackground(v=>v==='dark'?'light':'dark')}>
+            {cadBackground==='dark'?'Fundal alb':'Fundal închis'}
+          </button>
+
+          <button className={selecting?'active primary':''} onClick={()=>{setSelecting(v=>!v);setScreenCrop(null);setDragStart(null)}}>
+            {selecting?'Trage dreptunghiul…':'Selectează etajul'}
+          </button>
+
           <button onClick={useWholeDrawing}>Folosește tot desenul</button>
         </div>
 
         <div className="cad-real-shell">
-          <CadTrueViewer dxfBytes={prepared.dxfBytes} onReady={viewerReady} onError={e=>setError(e.message||String(e))}/>
+          <CadTrueViewer dxfBytes={prepared.dxfBytes} background={cadBackground} onReady={viewerReady} onError={e=>setError(e.message||String(e))}/>
           <div className={`cad-world-crop-layer ${selecting?'active':''}`} onPointerDown={startCrop} onPointerMove={moveCrop} onPointerUp={endCrop} onPointerCancel={endCrop}>
             {screenCrop&&<div className="cad-screen-crop" style={{left:screenCrop.x,top:screenCrop.y,width:screenCrop.w,height:screenCrop.h}}><span>ETAJ SELECTAT</span></div>}
           </div>
         </div>
+
+        {viewerInfo&&<div className="cad-viewer-diagnostics">
+          <b>Viewer CAD</b>
+          <span>{Number.isFinite(viewerInfo.entityCount)?`${viewerInfo.entityCount.toLocaleString('ro-RO')} entități`:'număr entități indisponibil'}</span>
+          {(viewerInfo.missed?.xrefs?.length||0)>0&&<span className="warn">{viewerInfo.missed.xrefs.length} XREF-uri lipsă</span>}
+          {(viewerInfo.missed?.images?.size||0)>0&&<span className="warn">{viewerInfo.missed.images.size} imagini lipsă</span>}
+          {viewerInfo.timedOut&&<span className="warn">randarea a depășit 30 sec</span>}
+        </div>}
 
         <div className="cad-selection-info">
           {normCrop?<><span>X {Math.round(normCrop.x*100)}%</span><span>Y {Math.round(normCrop.y*100)}%</span><span>W {Math.round(normCrop.w*100)}%</span><span>H {Math.round(normCrop.h*100)}%</span></>:<span>Nicio zonă selectată încă</span>}

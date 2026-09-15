@@ -1,3 +1,33 @@
+# Estate Studio — Build 04.2.3 CAD Display First
+
+Build concentrat strict pe afișarea corectă a planului CAD înainte de mapare.
+
+## Fixuri de viewer
+- fundalul CAD este acum ÎNTUNECAT implicit;
+- am eliminat forțarea fundalului alb care putea face entitățile CAD de culoare 7 (alb) complet invizibile;
+- există buton `Fundal alb / Fundal închis`;
+- copiem și configurăm explicit:
+  - `mtext-renderer-worker.js`
+  - `dxf-parser-worker.js`
+- verificăm worker-ele înainte de `openDocument`;
+- așteptăm terminarea progressive rendering înainte de framing;
+- `zoomToFitDrawing` rulează după procesarea entităților;
+- butonul `Încadrează desenul` repetă framingul pentru desene mari;
+- raportăm numărul de entități și datele lipsă.
+
+## XREF diagnostic
+Viewerul expune `missedData.xrefs`.
+Dacă DWG-ul principal conține doar mobilier/uși iar pereții sunt într-un XREF extern,
+Estate Studio afișează acum clar `X XREF-uri lipsă`.
+În acest caz fișierul DWG singur chiar nu conține geometria pereților și trebuie importat
+și XREF-ul sau primit un DWG cu referințele bind-uite.
+
+## Mapare
+Logica de mapare din 04.2.2 este păstrată, dar nu am modificat-o în acest build.
+Scopul 04.2.3 este să vedem întâi desenul complet și corect.
+
+`/api/version` => `04.2.3-cad-display-first`
+
 # Estate Studio — Build 04.2.2 Source Newline Fix
 
 Hotfix pentru eroarea Vite/PostCSS:

@@ -26,12 +26,30 @@ function copyLibreDwgWasm(){
       // Keep the alternate name too for package-version compatibility.
       fs.copyFileSync(src,path.join(assets,'libredwg.wasm'));
 
-      const mtextCandidates=[
-        path.resolve(__dirname,'node_modules/@mlightcad/cad-simple-viewer/dist/mtext-renderer-worker.js'),
-        path.resolve(__dirname,'node_modules/@mlightcad/cad-simple-viewer/dist/assets/mtext-renderer-worker.js')
+      const workerCopies=[
+        {
+          name:'mtext-renderer-worker.js',
+          candidates:[
+            path.resolve(__dirname,'node_modules/@mlightcad/cad-simple-viewer/dist/mtext-renderer-worker.js'),
+            path.resolve(__dirname,'node_modules/@mlightcad/cad-simple-viewer/dist/assets/mtext-renderer-worker.js')
+          ]
+        },
+        {
+          name:'dxf-parser-worker.js',
+          candidates:[
+            path.resolve(__dirname,'node_modules/@mlightcad/cad-simple-viewer/dist/dxf-parser-worker.js'),
+            path.resolve(__dirname,'node_modules/@mlightcad/cad-simple-viewer/dist/assets/dxf-parser-worker.js')
+          ]
+        }
       ];
-      const mtext=mtextCandidates.find(p=>fs.existsSync(p));
-      if(mtext)fs.copyFileSync(mtext,path.join(assets,'mtext-renderer-worker.js'));
+
+      for(const item of workerCopies){
+        const worker=item.candidates.find(p=>fs.existsSync(p));
+        if(!worker){
+          throw new Error(`Nu găsesc worker-ul CAD ${item.name} după npm install.`);
+        }
+        fs.copyFileSync(worker,path.join(assets,item.name));
+      }
     }
   };
 }
