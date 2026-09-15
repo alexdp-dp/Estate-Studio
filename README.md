@@ -1,3 +1,17 @@
+# Estate Studio — Build 04.4.10 Editor Syntax Hotfix
+
+Hotfix exact pentru eroarea de build din 04.4.9.
+
+Cauza era în `PlanEditor.jsx`: helper-ele pentru ștergerea ortogonală fuseseră inserate accidental **în mijlocul semnăturii `applySnap()`**, iar secvența `={}){` ajunsese după helper-e. Vite/esbuild se oprea la linia 38 cu `Expected ")" but found "function"`.
+
+În 04.4.10:
+- semnătura `applySnap(raw, points, {...}={})` este reparată;
+- helper-ele `cleanOrthogonalPoints()` și `deletePointOrthogonal()` sunt mutate în afara funcției, la nivel de modul;
+- editorul stabil și ștergerea ortogonală din 04.4.9 rămân neschimbate ca logică;
+- viewerul public cu `multiply` rămâne păstrat.
+
+`/api/version` => `04.4.10-editor-syntax-hotfix`
+
 # Estate Studio — Build 04.4.9 Stable Editor + Orthogonal Delete
 
 Hotfix pentru regresia editorului din 04.4.8.

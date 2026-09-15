@@ -16,7 +16,7 @@ function verifyPassword(password,record){const [,it,salt64,hash64]=record.split(
 function auth(req,res,next){try{req.user=jwt.verify(req.cookies.es_token,JWT_SECRET);next()}catch{res.status(401).json({error:'Unauthorized'})}}
 function clean(o,allowed){return Object.fromEntries(Object.entries(o||{}).filter(([k])=>allowed.includes(k)))}
 function send(res,data,error,status=500){if(error)return res.status(status).json({error:error.message||String(error)});res.json(data)}
-app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.4.9-editor-stable-delete-ortho',time:'2026-09-14'}));
+app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.4.10-editor-syntax-hotfix',time:'2026-09-14'}));
 app.get('/api/health',async(req,res)=>{const {error}=await sb.from('projects').select('id',{head:true,count:'exact'});res.status(error?500:200).json({ok:!error,supabase:!error,error:error?.message})});
 app.post('/api/auth/login',(req,res)=>{if(req.body?.username===ADMIN_USER&&verifyPassword(String(req.body?.password||''),ADMIN_HASH)){const token=jwt.sign({sub:ADMIN_USER},JWT_SECRET,{expiresIn:'24h'});res.cookie('es_token',token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',maxAge:86400000});return res.json({ok:true,user:ADMIN_USER})}res.status(401).json({error:'User sau parolă incorecte'})});
 app.get('/api/auth/me',auth,(req,res)=>res.json({user:req.user.sub}));

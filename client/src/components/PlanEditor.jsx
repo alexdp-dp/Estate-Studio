@@ -35,6 +35,47 @@ function applySnap(raw, points, {
   vertexThreshold=0.018
 }
 
+={}){
+  let p={x:clamp01(raw.x),y:clamp01(raw.y)};
+
+  if(snapVertices && points.length){
+    const first=points[0];
+    const nearest=points.reduce((best,current)=>{
+      const d=distance(p,current);
+      if(!best || d<best.d) return {point:current,d};
+      return best;
+    }, null);
+
+    if(nearest && nearest.d<=vertexThreshold){
+      return {x:nearest.point.x,y:nearest.point.y};
+    }
+
+    if(points.length>=2 && distance(p,first)<=vertexThreshold){
+      return {x:first.x,y:first.y};
+    }
+  }
+
+  if((snapOrtho || snap45) && points.length){
+    const anchor=points[points.length-1];
+    const dx=p.x-anchor.x;
+    const dy=p.y-anchor.y;
+    const len=Math.hypot(dx,dy);
+
+    if(len>0.000001){
+      const step=snap45 ? Math.PI/4 : Math.PI/2;
+      const angle=Math.atan2(dy,dx);
+      const snapped=Math.round(angle/step)*step;
+
+      p={
+        x:clamp01(anchor.x + Math.cos(snapped)*len),
+        y:clamp01(anchor.y + Math.sin(snapped)*len)
+      };
+    }
+  }
+
+  return p;
+}
+
 function cleanOrthogonalPoints(points,eps=0.0005){
   let out=points.map(p=>({x:clamp01(+p.x),y:clamp01(+p.y)}));
   out=out.filter((p,i)=>i===0||distance(p,out[i-1])>eps);
@@ -90,46 +131,6 @@ function deletePointOrthogonal(points,index){
     out.splice(insertAt,0,{x:clamp01(elbow.x),y:clamp01(elbow.y)});
   }
   return cleanOrthogonalPoints(out);
-}
-={}){
-  let p={x:clamp01(raw.x),y:clamp01(raw.y)};
-
-  if(snapVertices && points.length){
-    const first=points[0];
-    const nearest=points.reduce((best,current)=>{
-      const d=distance(p,current);
-      if(!best || d<best.d) return {point:current,d};
-      return best;
-    }, null);
-
-    if(nearest && nearest.d<=vertexThreshold){
-      return {x:nearest.point.x,y:nearest.point.y};
-    }
-
-    if(points.length>=2 && distance(p,first)<=vertexThreshold){
-      return {x:first.x,y:first.y};
-    }
-  }
-
-  if((snapOrtho || snap45) && points.length){
-    const anchor=points[points.length-1];
-    const dx=p.x-anchor.x;
-    const dy=p.y-anchor.y;
-    const len=Math.hypot(dx,dy);
-
-    if(len>0.000001){
-      const step=snap45 ? Math.PI/4 : Math.PI/2;
-      const angle=Math.atan2(dy,dx);
-      const snapped=Math.round(angle/step)*step;
-
-      p={
-        x:clamp01(anchor.x + Math.cos(snapped)*len),
-        y:clamp01(anchor.y + Math.sin(snapped)*len)
-      };
-    }
-  }
-
-  return p;
 }
 
 export default function PlanEditor({floor,onChanged}){
