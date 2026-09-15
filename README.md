@@ -1,19 +1,21 @@
-# Estate Studio — Build 04.4.8 Vertex Delete Ortho
+# Estate Studio — Build 04.4.9 Stable Editor + Orthogonal Delete
 
-Update pe editorul de poligoane din admin.
+Hotfix pentru regresia editorului din 04.4.8.
 
-## Ce repară
-- mutarea punctelor funcționează din nou stabil în modul **Editează**;
-- punctele se pot selecta vizual;
-- poți șterge un punct din butonul **Șterge punct**;
-- poți șterge și din **Delete / Backspace**;
-- poți șterge și cu **dublu click** sau **click dreapta** pe punct;
-- după ștergere, conturul se reface **ortogonal**, fără diagonale;
-- dacă punctele vecine sunt deja pe aceeași axă, segmentul se închide direct;
-- dacă nu sunt pe aceeași axă, se inserează automat un cot ortogonal și se simplifică segmentele coliniare.
+## Ce am schimbat
+- am restaurat **integral PlanEditor-ul stabil din 03.8.3**, cel în care drag-ul vertex-urilor funcționa;
+- peste acel editor stabil am adăugat MINIMAL doar selecția și ștergerea punctului;
+- nu am rescris logica de drag / pointer transform / viewport;
+- `Șterge punct` elimină vertex-ul selectat;
+- Delete / Backspace / dublu-click / click dreapta fac același lucru;
+- dacă vecinii au același X sau Y, poligonul se închide direct;
+- dacă legătura directă ar fi diagonală, se introduce **un singur cot la 90°**, ales lângă punctul șters;
+- apoi se elimină punctele coliniare redundante.
 
-## Versiune
-`/api/version` => `04.4.8-vertex-delete-ortho`
+## Viewer public
+Păstrează schimbarea din 04.4.7: overlay `multiply`, fără stroke, hover doar prin nuanță.
+
+`/api/version` => `04.4.9-editor-stable-delete-ortho`
 
 # Estate Studio — Build 04.4.7 Public Plan Multiply
 
