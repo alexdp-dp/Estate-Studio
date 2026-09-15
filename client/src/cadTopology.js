@@ -254,23 +254,27 @@ function isCommonText(text){
   return /(HOL COMUN|HOL ETAJ|CORIDOR|CIRCULATIE|PALIER|CASA SCARII|SCARA|LIFT|LOBBY|VESTIBUL COMUN)/.test(t);
 }
 
-export function mapApartmentsFromCad(segments,texts=[],aspect=1){
+export function mapApartmentsFromCad(segments,texts=[],aspect=1,doorHints=[]){
   const base=1100;
   const w=aspect>=1?base:Math.max(600,Math.round(base*aspect));
   const h=aspect>=1?Math.max(600,Math.round(base/aspect)):base;
   const wall=new Uint8Array(w*h);
 
   const structural=[];
+  const wallLayer=/WALL|ZID|PERET|MASON|ARCH|BETON|BCA|GIPS|PARTITION|COMPART/i;
+  const ignoreLayer=/MOB|FURN|SANIT|ECHIP|EQUIP|COTE|DIM|TEXT|AXE|GRID|VEG|PLANT|CAR|AUTO/i;
   for(const s of segments||[]){
     if(!Array.isArray(s)||s.length<4)continue;
+    const layer=String(s[4]||'');
+    if(ignoreLayer.test(layer))continue;
     const dx=s[2]-s[0],dy=s[3]-s[1];
     const len=Math.hypot(dx,dy);
-    if(len<.0045)continue;
+    if(len<.0035)continue;
 
     let a=Math.abs(Math.atan2(dy,dx));
     while(a>Math.PI)a-=Math.PI;
     const axis=Math.min(Math.abs(a),Math.abs(a-Math.PI/2),Math.abs(a-Math.PI));
-    if(axis<.14 || len>.018)structural.push(s);
+    if(wallLayer.test(layer) || axis<.16 || len>.014)structural.push(s);
   }
 
   for(const s of structural){
@@ -285,8 +289,8 @@ export function mapApartmentsFromCad(segments,texts=[],aspect=1){
   const thick=dilate(wall,w,h,1);
   const bridged=bridgeDirectional(
     thick,w,h,
-    Math.max(8,Math.round(Math.min(w,h)*.027)),
-    Math.max(4,Math.round(Math.min(w,h)*.005))
+    Math.max(10,Math.round(Math.min(w,h)*.040)),
+    Math.max(3,Math.round(Math.min(w,h)*.0035))
   );
   const closed=dilate(bridged.mask,w,h,1);
 
@@ -334,7 +338,7 @@ export function mapApartmentsFromCad(segments,texts=[],aspect=1){
     }
   }
 
-  const graphEdges=[...edges.values()].filter(e=>e.count>=2);
+  // Door swing arcs are much stronger evidence than a generic gap. Sample the room\n  // labels around each ARC and explicitly connect the two rooms separated by that door.\n  let doorHintEdges=0;\n  for(const hint of doorHints||[]){\n    const cx=Math.round(clamp(hint.x)*(w-1));\n    const cy=Math.round(clamp(hint.y)*(h-1));\n    const rx=Math.max(6,Math.round(Math.abs(hint.rx||.012)*w));\n    const ry=Math.max(6,Math.round(Math.abs(hint.ry||.012)*h));\n    const ids=new Set();\n    for(let a=0;a<Math.PI*2;a+=Math.PI/12){\n      for(const mul of [.55,.85,1.15]){\n        const x=Math.round(cx+Math.cos(a)*rx*mul);\n        const y=Math.round(cy+Math.sin(a)*ry*mul);\n        if(x<0||y<0||x>=w||y>=h)continue;\n        const id=cc.labels[at(x,y,w)];\n        if(roomSet.has(id))ids.add(id);\n      }\n    }\n    const arr=[...ids];\n    if(arr.length===2){\n      addEdge(arr[0],arr[1],{orientation:'arc',axis:0,from:0,to:0,size:0});\n      doorHintEdges++;\n    }\n  }\n\n  const graphEdges=[...edges.values()].filter(e=>e.count>=1);
   const degree=new Map(rooms.map(r=>[r.id,0]));
   for(const e of graphEdges){
     degree.set(e.a,(degree.get(e.a)||0)+1);
@@ -370,7 +374,7 @@ export function mapApartmentsFromCad(segments,texts=[],aspect=1){
     if(ranked[0]?.deg>=3)commonIds=[ranked[0].id];
   }
 
-  const common=new Set(commonIds);
+  // Common hall/lobby may be split by lift/stair cores. Expand from the best common\n  // cell into directly connected high-degree elongated neighbours.\n  if(commonIds.length){\n    const baseCommon=new Set(commonIds);\n    let changed=true,guard=0;\n    while(changed&&guard++<4){\n      changed=false;\n      for(const e of graphEdges){\n        const aIn=baseCommon.has(e.a),bIn=baseCommon.has(e.b);\n        if(aIn===bIn)continue;\n        const other=aIn?e.b:e.a;\n        const r=roomById.get(other);\n        if(!r)continue;\n        const deg=degree.get(other)||0;\n        const aspectR=Math.max(r.width,r.height)/Math.max(1,Math.min(r.width,r.height));\n        if(deg>=3 || (deg>=2&&aspectR>=2.1)){baseCommon.add(other);commonIds.push(other);changed=true}\n      }\n    }\n    commonIds=[...new Set(commonIds)];\n  }\n\n  const common=new Set(commonIds);
   const nodes=rooms.filter(r=>!common.has(r.id));
   const nodeSet=new Set(nodes.map(r=>r.id));
   const graph=new Map(nodes.map(r=>[r.id,[]]));
@@ -470,6 +474,7 @@ export function mapApartmentsFromCad(segments,texts=[],aspect=1){
       structuralSegments:structural.length,
       rooms:rooms.length,
       doors:graphEdges.length,
+      doorHints:doorHintEdges,
       commonIds:[...common],
       groupCount:detections.length
     }

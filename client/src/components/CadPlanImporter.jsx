@@ -1,390 +1,17 @@
-import React,{useMemo,useState} from 'react';
+import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {api} from '../api';
 import {mapApartmentsFromCad} from '../cadTopology';
 
 let librePromise=null;
+let activeCadViewer=null;
 
-function n(v,fallback=0){
-  const x=Number.parseFloat(String(v??''));
-  return Number.isFinite(x)?x:fallback;
-}
-
-function round6(v){
-  return Math.round(v*1e6)/1e6;
-}
-
-function svgDimensions(svg){
-  const vb=svg.viewBox?.baseVal;
-  if(vb && vb.width>0 && vb.height>0){
-    return {x:vb.x,y:vb.y,width:vb.width,height:vb.height};
-  }
-
-  const width=n(svg.getAttribute('width'),1000);
-  const height=n(svg.getAttribute('height'),700);
-  svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
-  return {x:0,y:0,width,height};
-}
-
-function normalizeSvg(svgInput){
-  // LibreDWG normally returns a string, but depending on the wrapper/browser build
-  // it can also surface a typed array. Normalize that first.
-  let raw=typeof svgInput==='string'
-    ? svgInput
-    : svgInput instanceof Uint8Array
-      ? new TextDecoder('utf-8').decode(svgInput)
-      : svgInput?.buffer instanceof ArrayBuffer
-        ? new TextDecoder('utf-8').decode(new Uint8Array(svgInput.buffer))
-        : String(svgInput??'');
-
-  // Some real-world DWGs contain text/control bytes that make an otherwise usable
-  // SVG fail strict XML parsing. Keep only the SVG document and sanitize characters
-  // that XML 1.0 cannot represent.
-  raw=raw
-    .replace(/^\uFEFF/,'')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'');
-
-  const start=raw.search(/<svg\b/i);
-  const closeMatches=[...raw.matchAll(/<\/svg\s*>/ig)];
-  const end=closeMatches.length
-    ? closeMatches[closeMatches.length-1].index + closeMatches[closeMatches.length-1][0].length
-    : -1;
-
-  if(start<0){
-    throw new Error('LibreDWG a citit fișierul, dar nu a produs niciun element <svg>.');
-  }
-
-  if(end>start)raw=raw.slice(start,end);
-  else raw=raw.slice(start);
-
-  // Bare ampersands are common in CAD text like "A&B" and invalidate XML.
-  raw=raw.replace(
-    /&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);)/gi,
-    '&amp;'
-  );
-
-  const parser=new DOMParser();
-  let doc=parser.parseFromString(raw,'image/svg+xml');
-  let svg=doc.documentElement;
-  let parseError=doc.querySelector('parsererror');
-
-  if(parseError || svg?.tagName?.toLowerCase()!=='svg'){
-    // Fallback: the HTML parser is deliberately tolerant of malformed CAD text/
-    // attributes. Once the SVG DOM exists, serialize it back to clean XML.
-    const htmlDoc=parser.parseFromString(
-      `<!doctype html><html><body>${raw}</body></html>`,
-      'text/html'
-    );
-    const tolerantSvg=htmlDoc.querySelector('svg');
-
-    if(!tolerantSvg){
-      const detail=(parseError?.textContent||'').replace(/\s+/g,' ').trim().slice(0,180);
-      throw new Error(
-        `SVG-ul LibreDWG este invalid și nu a putut fi reparat${detail?`: ${detail}`:''}.`
-      );
-    }
-
-    const cleanDoc=document.implementation.createDocument(
-      'http://www.w3.org/2000/svg',
-      'svg',
-      null
-    );
-    const imported=cleanDoc.importNode(tolerantSvg,true);
-    cleanDoc.replaceChild(imported,cleanDoc.documentElement);
-
-    doc=cleanDoc;
-    svg=doc.documentElement;
-  }
-
-  // Remove executable/foreign content. We only need vector drawing geometry.
-  svg.querySelectorAll('script,foreignObject').forEach(el=>el.remove());
-
-  const vb=svgDimensions(svg);
-
-  svg.setAttribute('xmlns','http://www.w3.org/2000/svg');
-  svg.setAttribute('width',String(vb.width));
-  svg.setAttribute('height',String(vb.height));
-  svg.setAttribute('preserveAspectRatio','xMidYMid meet');
-
-  // A white background makes the technical drawing predictable in both admin and embed.
-  const bg=doc.createElementNS('http://www.w3.org/2000/svg','rect');
-  bg.setAttribute('x',String(vb.x));
-  bg.setAttribute('y',String(vb.y));
-  bg.setAttribute('width',String(vb.width));
-  bg.setAttribute('height',String(vb.height));
-  bg.setAttribute('fill','#ffffff');
-  bg.setAttribute('data-estate-studio-background','1');
-  svg.insertBefore(bg,svg.firstChild);
-
-  const serialized=new XMLSerializer().serializeToString(svg);
-
-  // Final validation after the tolerant repair path. If this parses, the SVG is safe
-  // to upload and to feed to the segment extractor.
-  const verify=parser.parseFromString(serialized,'image/svg+xml');
-  const verifyError=verify.querySelector('parsererror');
-
-  if(verifyError){
-    const detail=(verifyError.textContent||'').replace(/\s+/g,' ').trim().slice(0,180);
-    throw new Error(`SVG-ul reparat nu este XML valid${detail?`: ${detail}`:''}.`);
-  }
-
-  return {
-    svg:verify.documentElement,
-    viewBox:vb,
-    text:serialized
-  };
-}
-
-function dedupeSegments(segments,max=14000){
-  const seen=new Set(),out=[];
-
-  function key(s){
-    const a=[round6(s[0]),round6(s[1])];
-    const b=[round6(s[2]),round6(s[3])];
-    const first=(a[0]<b[0] || (a[0]===b[0]&&a[1]<=b[1]))?a:b;
-    const second=first===a?b:a;
-    return `${first[0]},${first[1]}:${second[0]},${second[1]}`;
-  }
-
-  for(const s of segments){
-    if(out.length>=max)break;
-    if(!s.every(Number.isFinite))continue;
-    if(Math.hypot(s[2]-s[0],s[3]-s[1])<.00004)continue;
-
-    const k=key(s);
-    if(seen.has(k))continue;
-    seen.add(k);
-    out.push(s.map(round6));
-  }
-
-  return out;
-}
-
-function clipSegmentToCrop(a,b,crop){
-  const xMin=crop.x,yMin=crop.y;
-  const xMax=crop.x+crop.w,yMax=crop.y+crop.h;
-  let t0=0,t1=1;
-  const dx=b.x-a.x,dy=b.y-a.y;
-
-  const tests=[
-    [-dx,a.x-xMin],
-    [ dx,xMax-a.x],
-    [-dy,a.y-yMin],
-    [ dy,yMax-a.y]
-  ];
-
-  for(const [p,q] of tests){
-    if(Math.abs(p)<1e-12){
-      if(q<0)return null;
-      continue;
-    }
-    const r=q/p;
-    if(p<0){
-      if(r>t1)return null;
-      if(r>t0)t0=r;
-    }else{
-      if(r<t0)return null;
-      if(r<t1)t1=r;
-    }
-  }
-
-  const p0={x:a.x+t0*dx,y:a.y+t0*dy};
-  const p1={x:a.x+t1*dx,y:a.y+t1*dy};
-  return [p0,p1];
-}
-
-function normalizeCrop(crop){
-  const x=Math.max(0,Math.min(.9999,Number(crop?.x)||0));
-  const y=Math.max(0,Math.min(.9999,Number(crop?.y)||0));
-  const w=Math.max(.002,Math.min(1-x,Number(crop?.w)||1));
-  const h=Math.max(.002,Math.min(1-y,Number(crop?.h)||1));
-  return {x,y,w,h};
-}
-
-function cropSvgDocument(svgText,crop){
-  const c=normalizeCrop(crop);
-  const parser=new DOMParser();
-  const doc=parser.parseFromString(svgText,'image/svg+xml');
-  const svg=doc.documentElement;
-  const vb=svgDimensions(svg);
-
-  const next={
-    x:vb.x+c.x*vb.width,
-    y:vb.y+c.y*vb.height,
-    width:c.w*vb.width,
-    height:c.h*vb.height
-  };
-
-  svg.setAttribute('viewBox',`${next.x} ${next.y} ${next.width} ${next.height}`);
-
-  // Keep browser/storage dimensions small integers. Real CAD coordinates stay in settings.
-  const previewWidth=2000;
-  const previewHeight=Math.max(1,Math.round(previewWidth*(next.height/next.width)));
-  svg.setAttribute('width',String(previewWidth));
-  svg.setAttribute('height',String(previewHeight));
-  svg.setAttribute('preserveAspectRatio','xMidYMid meet');
-
-  return {
-    text:new XMLSerializer().serializeToString(svg),
-    originalViewBox:vb,
-    cropViewBox:next,
-    previewWidth,
-    previewHeight,
-    crop:c
-  };
-}
-
-
-async function extractCadSegments(svgText,crop={x:0,y:0,w:1,h:1}){
-  const parser=new DOMParser();
-  const doc=parser.parseFromString(svgText,'image/svg+xml');
-  const svg=doc.documentElement;
-  const vb=svgDimensions(svg);
-
-  const host=document.createElement('div');
-  host.style.cssText='position:fixed;left:-100000px;top:0;width:1200px;height:900px;visibility:hidden;pointer-events:none;';
-  document.body.appendChild(host);
-
-  const liveSvg=document.importNode(svg,true);
-  liveSvg.style.width='1200px';
-  liveSvg.style.height='900px';
-  host.appendChild(liveSvg);
-
-  // Let the browser compute transforms / path metrics.
-  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-
-  const rootScreen=liveSvg.getScreenCTM();
-  if(!rootScreen){
-    host.remove();
-    return {segments:[],entityCount:0};
-  }
-  const rootInv=rootScreen.inverse();
-
-  function rootPoint(el,x,y){
-    const m=el.getScreenCTM();
-    if(!m)return null;
-    const screen=new DOMPoint(x,y).matrixTransform(m);
-    const p=screen.matrixTransform(rootInv);
-    return {
-      x:(p.x-vb.x)/vb.width,
-      y:(p.y-vb.y)/vb.height
-    };
-  }
-
-  const segments=[];
-  const texts=[];
-  let entityCount=0;
-
-  const activeCrop=normalizeCrop(crop);
-
-  function push(a,b){
-    if(!a||!b)return;
-
-    const clipped=clipSegmentToCrop(a,b,activeCrop);
-    if(!clipped)return;
-
-    const [p0,p1]=clipped;
-
-    // Re-normalize selected CAD geometry to the cropped plan (0..1).
-    const ax=(p0.x-activeCrop.x)/activeCrop.w;
-    const ay=(p0.y-activeCrop.y)/activeCrop.h;
-    const bx=(p1.x-activeCrop.x)/activeCrop.w;
-    const by=(p1.y-activeCrop.y)/activeCrop.h;
-
-    segments.push([
-      Math.max(0,Math.min(1,ax)),
-      Math.max(0,Math.min(1,ay)),
-      Math.max(0,Math.min(1,bx)),
-      Math.max(0,Math.min(1,by))
-    ]);
-  }
-
-  const elements=[...liveSvg.querySelectorAll('line,polyline,polygon,rect,path,circle,ellipse,text')];
-
-  for(const el of elements){
-    if(el.getAttribute('data-estate-studio-background')==='1')continue;
-    entityCount++;
-
-    const tag=el.tagName.toLowerCase();
-
-    try{
-      if(tag==='line'){
-        push(
-          rootPoint(el,n(el.getAttribute('x1')),n(el.getAttribute('y1'))),
-          rootPoint(el,n(el.getAttribute('x2')),n(el.getAttribute('y2')))
-        );
-        continue;
-      }
-
-      if(tag==='rect'){
-        const x=n(el.getAttribute('x')),y=n(el.getAttribute('y'));
-        const w=n(el.getAttribute('width')),h=n(el.getAttribute('height'));
-        const pts=[
-          rootPoint(el,x,y),
-          rootPoint(el,x+w,y),
-          rootPoint(el,x+w,y+h),
-          rootPoint(el,x,y+h)
-        ];
-        for(let i=0;i<4;i++)push(pts[i],pts[(i+1)%4]);
-        continue;
-      }
-
-      if(tag==='polyline'||tag==='polygon'){
-        const pts=[...(el.points||[])].map(p=>rootPoint(el,p.x,p.y)).filter(Boolean);
-        for(let i=0;i<pts.length-1;i++)push(pts[i],pts[i+1]);
-        if(tag==='polygon'&&pts.length>2)push(pts[pts.length-1],pts[0]);
-        continue;
-      }
-
-      if(tag==='text'){
-        const box=el.getBBox?.();
-        if(box){
-          const p=rootPoint(el,box.x+box.width/2,box.y+box.height/2);
-          if(p){
-            texts.push({
-              text:String(el.textContent||'').trim(),
-              x:(p.x-activeCrop.x)/activeCrop.w,
-              y:(p.y-activeCrop.y)/activeCrop.h
-            });
-          }
-        }
-        continue;
-      }
-
-      if(typeof el.getTotalLength==='function'){
-        const total=el.getTotalLength();
-        if(!Number.isFinite(total)||total<=0)continue;
-
-        // Curves/arcs are approximated into short vector segments. Straight CAD lines
-        // stay exact because their path length is sampled only at their endpoints.
-        const samples=Math.max(1,Math.min(80,Math.ceil(total/Math.max(8,total/24))));
-        let prev=null;
-
-        for(let i=0;i<=samples;i++){
-          const local=el.getPointAtLength(total*i/samples);
-          const p=rootPoint(el,local.x,local.y);
-          if(prev&&p)push(prev,p);
-          prev=p;
-        }
-      }
-    }catch(err){
-      console.warn('CAD entity skipped:',tag,err);
-    }
-  }
-
-  host.remove();
-
-  return {
-    segments:dedupeSegments(segments),
-    texts:texts.filter(t=>t.text&&t.x>=0&&t.x<=1&&t.y>=0&&t.y<=1),
-    entityCount
-  };
-}
+function clamp(v,a=0,b=1){return Math.max(a,Math.min(b,v))}
+function n(v,fallback=0){const x=Number.parseFloat(String(v??''));return Number.isFinite(x)?x:fallback}
 
 async function getLibreDwg(){
   if(!librePromise){
     librePromise=(async()=>{
       const mod=await import('@mlightcad/libredwg-web');
-      // Vite copies libredwg-web.wasm to /assets/ during build.
       const instance=await mod.LibreDwg.create('/assets/');
       return {instance,Dwg_File_Type:mod.Dwg_File_Type};
     })();
@@ -392,32 +19,332 @@ async function getLibreDwg(){
   return librePromise;
 }
 
-async function dwgToSvg(file,onStage){
-  const {instance,Dwg_File_Type}=await getLibreDwg();
+async function dwgToDxf(file,onStage){
+  const {instance}=await getLibreDwg();
   const buffer=await file.arrayBuffer();
+  onStage?.('Convertesc DWG → DXF pentru viewerul CAD real…');
+  const out=instance.dwg_write_dxf(buffer);
+  if(!out||!out.byteLength)throw new Error('LibreDWG nu a putut converti DWG-ul în DXF.');
+  return out instanceof Uint8Array?out:new Uint8Array(out);
+}
 
-  onStage?.('Citesc geometria DWG…');
+function arrayBufferOf(bytes){
+  return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);
+}
 
-  let ptr=null;
-  try{
-    ptr=instance.dwg_read_data(buffer,Dwg_File_Type.DWG);
-    if(!ptr)throw new Error('LibreDWG nu a putut citi fișierul.');
+function normText(v){
+  return String(v||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toUpperCase().trim();
+}
 
-    const db=instance.convert(ptr);
-    onStage?.('Generez planul vectorial SVG…');
+function parsePoint(entity,xCode='10',yCode='20'){
+  const x=n(entity.values.get(xCode)?.[0],NaN),y=n(entity.values.get(yCode)?.[0],NaN);
+  return Number.isFinite(x)&&Number.isFinite(y)?{x,y}:null;
+}
 
-    const svgOutput=instance.dwg_to_svg(db);
-    if(svgOutput==null){
-      throw new Error('DWG-ul a fost citit, dar LibreDWG nu a returnat conținut SVG.');
+function valuesMap(pairs){
+  const m=new Map();
+  for(const [code,val] of pairs){
+    const k=String(code);
+    if(!m.has(k))m.set(k,[]);
+    m.get(k).push(val);
+  }
+  return m;
+}
+
+function dxfPairs(text){
+  const lines=text.replace(/\r/g,'').split('\n');
+  const out=[];
+  for(let i=0;i+1<lines.length;i+=2){
+    const code=Number.parseInt(lines[i].trim(),10);
+    if(!Number.isFinite(code))continue;
+    out.push([code,lines[i+1]??'']);
+  }
+  return out;
+}
+
+function parseDxfDocument(bytes){
+  const text=new TextDecoder('utf-8').decode(bytes);
+  const pairs=dxfPairs(text);
+  const blocks=new Map();
+  const entities=[];
+
+  let section='';
+  let i=0;
+
+  function readEntity(start){
+    const type=String(pairs[start]?.[1]||'').trim().toUpperCase();
+    const vals=[];
+    let j=start+1;
+    while(j<pairs.length && pairs[j][0]!==0){vals.push(pairs[j]);j++}
+    return [{type,values:valuesMap(vals),pairs:vals},j];
+  }
+
+  while(i<pairs.length){
+    const [code,valRaw]=pairs[i];
+    const val=String(valRaw||'').trim();
+
+    if(code===0&&val==='SECTION'){
+      const next=pairs[i+1];
+      section=next&&next[0]===2?String(next[1]).trim().toUpperCase():'';
+      i+=2;continue;
+    }
+    if(code===0&&val==='ENDSEC'){section='';i++;continue}
+
+    if(section==='BLOCKS'&&code===0&&val==='BLOCK'){
+      const header=[];let j=i+1;
+      while(j<pairs.length&&pairs[j][0]!==0){header.push(pairs[j]);j++}
+      const hm=valuesMap(header);
+      const name=String(hm.get('2')?.[0]||hm.get('3')?.[0]||'').trim();
+      const base={x:n(hm.get('10')?.[0],0),y:n(hm.get('20')?.[0],0)};
+      const list=[];
+      while(j<pairs.length){
+        if(pairs[j][0]===0&&String(pairs[j][1]).trim().toUpperCase()==='ENDBLK'){
+          j++;while(j<pairs.length&&pairs[j][0]!==0)j++;break;
+        }
+        if(pairs[j][0]===0){
+          const [e,next]=readEntity(j);list.push(e);j=next;
+        }else j++;
+      }
+      if(name)blocks.set(name,{name,base,entities:list});
+      i=j;continue;
     }
 
-    onStage?.('Curăț și normalizez SVG-ul generat…');
-    return normalizeSvg(svgOutput);
-  }finally{
-    if(ptr){
-      try{instance.dwg_free(ptr)}catch{}
+    if(section==='ENTITIES'&&code===0){
+      const [e,next]=readEntity(i);entities.push(e);i=next;continue;
+    }
+    i++;
+  }
+
+  return {entities,blocks};
+}
+
+function transformPoint(p,t){
+  const sx=t.sx??1,sy=t.sy??1,rot=t.rot??0;
+  const ox=(p.x-(t.baseX||0))*sx,oy=(p.y-(t.baseY||0))*sy;
+  const c=Math.cos(rot),s=Math.sin(rot);
+  return {x:(t.tx||0)+ox*c-oy*s,y:(t.ty||0)+ox*s+oy*c};
+}
+
+function composeTransform(parent,local){
+  // Good enough for 2D architectural blocks; handles translation/scale/rotation recursively.
+  const origin=transformPoint({x:local.tx||0,y:local.ty||0},parent);
+  return {
+    tx:origin.x,ty:origin.y,
+    sx:(parent.sx??1)*(local.sx??1),
+    sy:(parent.sy??1)*(local.sy??1),
+    rot:(parent.rot??0)+(local.rot??0),
+    baseX:local.baseX||0,baseY:local.baseY||0
+  };
+}
+
+function sampleArc(center,r,startDeg,endDeg,transform,push){
+  if(!center||!Number.isFinite(r)||r<=0)return;
+  let a0=startDeg*Math.PI/180,a1=endDeg*Math.PI/180;
+  while(a1<a0)a1+=Math.PI*2;
+  const sweep=Math.min(Math.PI*2,a1-a0);
+  const steps=Math.max(5,Math.min(28,Math.ceil(sweep/(Math.PI/24))));
+  let prev=null;
+  for(let i=0;i<=steps;i++){
+    const a=a0+sweep*i/steps;
+    const p=transformPoint({x:center.x+r*Math.cos(a),y:center.y+r*Math.sin(a)},transform);
+    if(prev)push(prev,p);
+    prev=p;
+  }
+}
+
+function collectCadGeometry(doc,cropWorld){
+  const segments=[];const texts=[];const doors=[];
+  const xmin=cropWorld.minX,ymin=cropWorld.minY,xmax=cropWorld.maxX,ymax=cropWorld.maxY;
+  const cw=Math.max(1e-9,xmax-xmin),ch=Math.max(1e-9,ymax-ymin);
+
+  const layerFurniture=/MOB|FURN|SANIT|ECHIP|EQUIP|COTE|DIM|TEXT|AXE|GRID|HATCH|VEG|PLANT|CAR|AUTO/i;
+  const layerDoor=/USA|USI|DOOR|TAMPL|JOINERY|CARP/i;
+
+  function normalize(p){return {x:(p.x-xmin)/cw,y:1-(p.y-ymin)/ch}}
+  function inside(p,margin=.05){return p.x>=xmin-cw*margin&&p.x<=xmax+cw*margin&&p.y>=ymin-ch*margin&&p.y<=ymax+ch*margin}
+  function pushLine(a,b,layer=''){
+    if(!a||!b)return;
+    if(!inside(a)&&!inside(b))return;
+    const A=normalize(a),B=normalize(b);
+    const len=Math.hypot(B.x-A.x,B.y-A.y);
+    if(len<.00003)return;
+    segments.push([clamp(A.x,-.08,1.08),clamp(A.y,-.08,1.08),clamp(B.x,-.08,1.08),clamp(B.y,-.08,1.08),String(layer||'')]);
+  }
+  function pushText(p,text,layer=''){
+    if(!p||!inside(p,.02)||!String(text||'').trim())return;
+    const q=normalize(p);texts.push({text:String(text).trim(),x:clamp(q.x),y:clamp(q.y),layer:String(layer||'')});
+  }
+  function pushDoor(center,r,layer,start,end){
+    if(!center||!inside(center,.06))return;
+    const q=normalize(center);
+    doors.push({x:clamp(q.x),y:clamp(q.y),rx:Math.abs(r/cw),ry:Math.abs(r/ch),layer:String(layer||''),start,end});
+  }
+
+  function walk(entity,transform={tx:0,ty:0,sx:1,sy:1,rot:0,baseX:0,baseY:0},depth=0){
+    if(depth>8||!entity)return;
+    const type=entity.type;
+    const v=entity.values;
+    const layer=String(v.get('8')?.[0]||'');
+
+    if(type==='LINE'){
+      const a=parsePoint(entity,'10','20'),b=parsePoint(entity,'11','21');
+      if(a&&b)pushLine(transformPoint(a,transform),transformPoint(b,transform),layer);
+      return;
+    }
+
+    if(type==='LWPOLYLINE'){
+      const xs=v.get('10')||[],ys=v.get('20')||[];
+      const pts=[];
+      for(let k=0;k<Math.min(xs.length,ys.length);k++)pts.push(transformPoint({x:n(xs[k]),y:n(ys[k])},transform));
+      for(let k=0;k<pts.length-1;k++)pushLine(pts[k],pts[k+1],layer);
+      const flags=n(v.get('70')?.[0],0);
+      if((flags&1)&&pts.length>2)pushLine(pts[pts.length-1],pts[0],layer);
+      return;
+    }
+
+    if(type==='POLYLINE'){
+      // LibreDWG DXF usually serializes child VERTEX entities separately; if vertices are embedded, accept them.
+      const xs=v.get('10')||[],ys=v.get('20')||[];
+      const pts=[];
+      for(let k=0;k<Math.min(xs.length,ys.length);k++)pts.push(transformPoint({x:n(xs[k]),y:n(ys[k])},transform));
+      for(let k=0;k<pts.length-1;k++)pushLine(pts[k],pts[k+1],layer);
+      return;
+    }
+
+    if(type==='ARC'){
+      const center=parsePoint(entity,'10','20'),r=n(v.get('40')?.[0],NaN);
+      const a0=n(v.get('50')?.[0],0),a1=n(v.get('51')?.[0],90);
+      if(center&&Number.isFinite(r)){
+        sampleArc(center,r,a0,a1,transform,(a,b)=>pushLine(a,b,layer));
+        const span=((a1-a0+360)%360)||360;
+        const c=transformPoint(center,transform);
+        if(layerDoor.test(layer)||(span>=55&&span<=125))pushDoor(c,r*Math.max(Math.abs(transform.sx||1),Math.abs(transform.sy||1)),layer,a0,a1);
+      }
+      return;
+    }
+
+    if(type==='CIRCLE'){
+      const center=parsePoint(entity,'10','20'),r=n(v.get('40')?.[0],NaN);
+      if(center&&Number.isFinite(r)&&!layerFurniture.test(layer))sampleArc(center,r,0,360,transform,(a,b)=>pushLine(a,b,layer));
+      return;
+    }
+
+    if(type==='TEXT'||type==='MTEXT'||type==='ATTRIB'||type==='ATTDEF'){
+      const p=parsePoint(entity,'10','20');
+      const text=(v.get('1')||[]).concat(v.get('3')||[]).join(' ');
+      if(p)pushText(transformPoint(p,transform),text,layer);
+      return;
+    }
+
+    if(type==='INSERT'){
+      const name=String(v.get('2')?.[0]||'').trim();
+      const p=parsePoint(entity,'10','20')||{x:0,y:0};
+      const block=doc.blocks.get(name);
+      if(!block)return;
+      const local={
+        tx:p.x,ty:p.y,
+        sx:n(v.get('41')?.[0],1),sy:n(v.get('42')?.[0],1),
+        rot:n(v.get('50')?.[0],0)*Math.PI/180,
+        baseX:block.base.x,baseY:block.base.y
+      };
+      const composed=composeTransform(transform,local);
+      for(const child of block.entities)walk(child,composed,depth+1);
+      return;
+    }
+
+    if(type==='SOLID'||type==='TRACE'||type==='3DFACE'){
+      const pts=[];
+      for(const c of [['10','20'],['11','21'],['12','22'],['13','23']]){
+        const p=parsePoint(entity,c[0],c[1]);if(p)pts.push(transformPoint(p,transform));
+      }
+      for(let k=0;k<pts.length;k++)pushLine(pts[k],pts[(k+1)%pts.length],layer);
     }
   }
+
+  for(const e of doc.entities)walk(e);
+
+  // Remove obvious furniture-only layers only from mapping linework, not from viewer.
+  const cleanSegments=segments.filter(s=>!layerFurniture.test(String(s[4]||'')));
+  return {segments:cleanSegments,texts,doors,entityCount:doc.entities.length};
+}
+
+function makePlanSvg(geometry,width=2000){
+  const segs=geometry.segments||[],texts=geometry.texts||[];
+  let maxY=1;
+  const height=Math.max(600,Math.round(width/maxY));
+  const lines=segs.slice(0,45000).map(s=>`<line x1="${s[0]*width}" y1="${s[1]*height}" x2="${s[2]*width}" y2="${s[3]*height}"/>`).join('');
+  const labels=texts.slice(0,5000).map(t=>`<text x="${t.x*width}" y="${t.y*height}">${String(t.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</text>`).join('');
+  return {text:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" preserveAspectRatio="none"><rect width="100%" height="100%" fill="white"/><g fill="none" stroke="#222" stroke-width="1.2" vector-effect="non-scaling-stroke">${lines}</g><g fill="#444" font-family="Arial,sans-serif" font-size="9">${labels}</g></svg>`,width,height};
+}
+
+function CadTrueViewer({dxfBytes,onReady,onError}){
+  const hostRef=useRef(null);
+
+  useEffect(()=>{
+    let dead=false;
+    let localManager=null;
+
+    (async()=>{
+      try{
+        const {AcApDocManager}=await import('@mlightcad/cad-simple-viewer');
+        if(activeCadViewer){
+          try{activeCadViewer.destroy?.()}catch{}
+          activeCadViewer=null;
+        }
+
+        const created=AcApDocManager.createInstance({
+          container:hostRef.current,
+          baseUrl:'/',
+          webworkerFileUrls:{mtextRender:'/assets/mtext-renderer-worker.js'}
+        });
+        localManager=created||AcApDocManager.instance;
+        activeCadViewer=localManager;
+
+        const ok=await localManager.openDocument('estate-studio-preview.dxf',arrayBufferOf(dxfBytes),{
+          minimumChunkSize:1200,
+          readOnly:true
+        });
+        if(!ok)throw new Error('Viewerul CAD nu a putut deschide DXF-ul intermediar.');
+        if(dead)return;
+
+        try{localManager.curView.backgroundColor=0xffffff}catch{}
+        try{localManager.curView.zoomToFitDrawing(12000)}catch{}
+        setTimeout(()=>{if(!dead)onReady?.(localManager)},350);
+      }catch(e){
+        console.error(e);if(!dead)onError?.(e);
+      }
+    })();
+
+    return ()=>{
+      dead=true;
+      if(localManager&&activeCadViewer===localManager){
+        try{localManager.destroy?.()}catch{}
+        activeCadViewer=null;
+      }
+    };
+  },[dxfBytes]);
+
+  return <div ref={hostRef} className="cad-true-viewer"/>;
+}
+
+function bboxValues(box){
+  const min=box?.minPoint||box?.min||{};
+  const max=box?.maxPoint||box?.max||{};
+  return {
+    minX:n(min.x,0),minY:n(min.y,0),
+    maxX:n(max.x,1),maxY:n(max.y,1)
+  };
+}
+
+function normalizeWorldCrop(crop,bbox){
+  const b=bboxValues(bbox);
+  const w=Math.max(1e-9,b.maxX-b.minX),h=Math.max(1e-9,b.maxY-b.minY);
+  return {
+    x:clamp((crop.minX-b.minX)/w),
+    y:clamp((b.maxY-crop.maxY)/h),
+    w:clamp((crop.maxX-crop.minX)/w,.002,1),
+    h:clamp((crop.maxY-crop.minY)/h,.002,1)
+  };
 }
 
 export default function CadPlanImporter({project,building,floor,onClose,onImported}){
@@ -425,404 +352,214 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
   const [busy,setBusy]=useState(false);
   const [stage,setStage]=useState('');
   const [error,setError]=useState('');
-  const [stats,setStats]=useState(null);
-  const [cadData,setCadData]=useState(null);
-  const [mapping,setMapping]=useState(null);
-  const [showWalls,setShowWalls]=useState(false);
-
-  // Prepared DWG stays in browser until user chooses the actual floor plan from the sheet.
   const [prepared,setPrepared]=useState(null);
-  const [previewUrl,setPreviewUrl]=useState('');
-  const [crop,setCrop]=useState({x:0,y:0,w:1,h:1});
+  const [viewer,setViewer]=useState(null);
+  const [viewerBbox,setViewerBbox]=useState(null);
+  const [cropWorld,setCropWorld]=useState(null);
+  const [screenCrop,setScreenCrop]=useState(null);
   const [dragStart,setDragStart]=useState(null);
+  const [selecting,setSelecting]=useState(false);
+  const [geometry,setGeometry]=useState(null);
+  const [mapping,setMapping]=useState(null);
+  const [mapPreview,setMapPreview]=useState('');
+  const [showWalls,setShowWalls]=useState(false);
 
   const sourceName=useMemo(()=>floor?.settings?.cad?.source_file||null,[floor?.settings]);
 
-  function clearPreviewUrl(){
-    if(previewUrl){
-      try{URL.revokeObjectURL(previewUrl)}catch{}
-    }
-    setPreviewUrl('');
-  }
+  function cleanupPreview(){if(mapPreview){try{URL.revokeObjectURL(mapPreview)}catch{}setMapPreview('')}}
 
   async function prepareCad(){
     if(!file)return;
-    setBusy(true);setError('');setStats(null);
-    clearPreviewUrl();
-
+    setBusy(true);setError('');setStage('');cleanupPreview();
     try{
-      if(!/\.dwg$/i.test(file.name)){
-        throw new Error('În acest build importul CAD este pentru fișiere .DWG.');
-      }
-
-      const converted=await dwgToSvg(file,setStage);
-
-      const url=URL.createObjectURL(
-        new Blob([converted.text],{type:'image/svg+xml'})
-      );
-
-      setPrepared(converted);
-      setPreviewUrl(url);
-      setCrop({x:0,y:0,w:1,h:1});
-      setStage('DWG pregătit. Selectează din planșă etajul pe care vrei să-l folosești.');
-    }catch(e){
-      console.error(e);
-      setError(e.message||String(e));
-      setStage('');
-    }finally{
-      setBusy(false);
-    }
+      if(!/\.dwg$/i.test(file.name))throw new Error('Alege un fișier .DWG.');
+      const dxfBytes=await dwgToDxf(file,setStage);
+      setPrepared({dxfBytes});
+      setSelecting(false);setCropWorld(null);setScreenCrop(null);setGeometry(null);setMapping(null);
+      setStage('Viewer CAD real pregătit. Poți face zoom/pan și apoi selecta planul etajului.');
+    }catch(e){console.error(e);setError(e.message||String(e));setStage('')}
+    finally{setBusy(false)}
   }
 
-  function pointerNorm(e){
-    const el=e.currentTarget;
-    const r=el.getBoundingClientRect();
-    return {
-      x:Math.max(0,Math.min(1,(e.clientX-r.left)/Math.max(1,r.width))),
-      y:Math.max(0,Math.min(1,(e.clientY-r.top)/Math.max(1,r.height)))
-    };
+  function viewerReady(mgr){
+    setViewer(mgr);
+    const b=mgr?.curView?.bbox;
+    setViewerBbox(b||null);
+    setStage('DWG afișat prin renderer CAD. Folosește zoom/pan, apoi „Selectează etajul”.');
   }
 
-  function cropStart(e){
-    if(!prepared||busy)return;
-    setMapping(null);setCadData(null);
+  function localPoint(e){
+    const r=e.currentTarget.getBoundingClientRect();
+    return {x:e.clientX-r.left,y:e.clientY-r.top,w:r.width,h:r.height};
+  }
+
+  function startCrop(e){
+    if(!selecting||!viewer)return;
+    e.preventDefault();e.stopPropagation();
+    const p=localPoint(e);
+    const world=viewer.curView.screenToWorld({x:p.x,y:p.y});
+    setDragStart({screen:p,world});
+    setScreenCrop({x:p.x,y:p.y,w:1,h:1});
     e.currentTarget.setPointerCapture?.(e.pointerId);
-    const p=pointerNorm(e);
-    setDragStart(p);
-    setCrop({x:p.x,y:p.y,w:.002,h:.002});
   }
 
-  function cropMove(e){
-    if(!dragStart||!prepared||busy)return;
-    setMapping(null);setCadData(null);
-    const p=pointerNorm(e);
-    const x=Math.min(dragStart.x,p.x);
-    const y=Math.min(dragStart.y,p.y);
-    const w=Math.max(.002,Math.abs(p.x-dragStart.x));
-    const h=Math.max(.002,Math.abs(p.y-dragStart.y));
-    setCrop(normalizeCrop({x,y,w,h}));
+  function moveCrop(e){
+    if(!selecting||!dragStart||!viewer)return;
+    e.preventDefault();e.stopPropagation();
+    const p=localPoint(e);
+    setScreenCrop({x:Math.min(dragStart.screen.x,p.x),y:Math.min(dragStart.screen.y,p.y),w:Math.abs(p.x-dragStart.screen.x),h:Math.abs(p.y-dragStart.screen.y)});
   }
 
-  function cropEnd(e){
-    if(!dragStart)return;
+  function endCrop(e){
+    if(!selecting||!dragStart||!viewer)return;
+    e.preventDefault();e.stopPropagation();
+    const p=localPoint(e);
+    const world=viewer.curView.screenToWorld({x:p.x,y:p.y});
+    const c={
+      minX:Math.min(dragStart.world.x,world.x),maxX:Math.max(dragStart.world.x,world.x),
+      minY:Math.min(dragStart.world.y,world.y),maxY:Math.max(dragStart.world.y,world.y)
+    };
+    setCropWorld(c);setDragStart(null);setSelecting(false);setGeometry(null);setMapping(null);cleanupPreview();
     try{e.currentTarget.releasePointerCapture?.(e.pointerId)}catch{}
-    setDragStart(null);
+    setStage('Etaj selectat. Acum pot grupa camerele în apartamente folosind ușile și holul comun.');
   }
 
-  async function analyzeCadSelection(){
-    if(!prepared)return;
-    setBusy(true);setError('');setStats(null);setMapping(null);
-
-    try{
-      const selected=normalizeCrop(crop);
-      setStage('Citesc pereții, ușile și textele din geometria DWG…');
-
-      const geometry=await extractCadSegments(prepared.text,selected);
-      if(!geometry.segments.length)throw new Error('Nu am găsit linii CAD în selecție.');
-
-      const cropped=cropSvgDocument(prepared.text,selected);
-      const aspect=cropped.previewWidth/Math.max(1,cropped.previewHeight);
-      const mapped=mapApartmentsFromCad(geometry.segments,geometry.texts||[],aspect);
-
-      setCadData({geometry,cropped,selected});
-      setMapping(mapped);
-      setStats({entities:geometry.entityCount,segments:geometry.segments.length});
-
-      setStage(
-        mapped.detections.length
-          ? `Mapare CAD: ${mapped.detections.length} apartamente propuse.`
-          : 'Am citit geometria, dar nu am reușit să separ apartamentele automat.'
-      );
-    }catch(e){
-      console.error(e);
-      setError(e.message||String(e));
-      setStage('');
-    }finally{
-      setBusy(false);
-    }
+  function useWholeDrawing(){
+    if(!viewer?.curView?.bbox)return;
+    const b=bboxValues(viewer.curView.bbox);
+    setCropWorld(b);setScreenCrop(null);setSelecting(false);setGeometry(null);setMapping(null);cleanupPreview();
+    setStage('Folosesc întreg desenul ca plan de etaj.');
   }
 
-  async function saveCadSelection(){
-    if(!file||!prepared)return;
-    setBusy(true);setError('');setStats(null);
-
+  async function analyze(){
+    if(!prepared||!cropWorld)return;
+    setBusy(true);setError('');setMapping(null);cleanupPreview();
     try{
-      const selected=normalizeCrop(crop);
-      const cropped=cadData?.cropped||cropSvgDocument(prepared.text,selected);
+      setStage('Citesc DXF-ul și expandez blocurile/INSERT-urile…');
+      const doc=parseDxfDocument(prepared.dxfBytes);
+      const g=collectCadGeometry(doc,cropWorld);
+      if(!g.segments.length)throw new Error('Nu am găsit suficient linework CAD în selecție.');
 
-      setStage('Extrag doar geometria CAD din zona selectată…');
-      const geometry=cadData?.geometry||await extractCadSegments(prepared.text,selected);
+      const aspect=Math.max(.2,Math.min(5,(cropWorld.maxX-cropWorld.minX)/Math.max(1e-9,cropWorld.maxY-cropWorld.minY)));
+      setStage('Grupez camerele prin uși și elimin holul comun…');
+      const mapped=mapApartmentsFromCad(g.segments,g.texts,aspect,g.doors);
+      setGeometry(g);setMapping(mapped);
 
-      setStats({
-        entities:geometry.entityCount,
-        segments:geometry.segments.length
-      });
+      const plan=makePlanSvg(g,2000);
+      const url=URL.createObjectURL(new Blob([plan.text],{type:'image/svg+xml'}));
+      setMapPreview(url);
 
-      if(!geometry.segments.length){
-        throw new Error(
-          'Selecția nu conține geometrie CAD utilizabilă pentru snap. Trage dreptunghiul exact peste planul etajului.'
-        );
-      }
+      setStage(mapped.detections.length?`Mapare: ${mapped.detections.length} apartamente propuse.`:'Nu am reușit încă să formez apartamente complete.');
+    }catch(e){console.error(e);setError(e.message||String(e));setStage('')}
+    finally{setBusy(false)}
+  }
 
+  async function save(){
+    if(!file||!prepared||!cropWorld||!geometry)return;
+    setBusy(true);setError('');
+    try{
+      const plan=makePlanSvg(geometry,2000);
       setStage('Salvez DWG-ul original…');
       const rawFd=new FormData();
-      rawFd.append('file',file);
-      rawFd.append('project_id',project.id);
-      rawFd.append('building_id',building.id);
-      rawFd.append('floor_id',floor.id);
-      rawFd.append('asset_type','floor-cad-source');
-      rawFd.append('label',`${floor.name} · DWG sursă`);
+      rawFd.append('file',file);rawFd.append('project_id',project.id);rawFd.append('building_id',building.id);rawFd.append('floor_id',floor.id);
+      rawFd.append('asset_type','floor-cad-source');rawFd.append('label',`${floor.name} · DWG sursă`);
       const raw=await api('/admin/upload/project-documents',{method:'POST',body:rawFd});
 
-      setStage('Salvez doar planul selectat ca SVG…');
-      const svgName=file.name.replace(/\.dwg$/i,'')+`-${floor.id}.svg`;
-      const svgFile=new File(
-        [cropped.text],
-        svgName,
-        {type:'image/svg+xml'}
-      );
+      setStage('Salvez planul vectorial reconstruit din DXF…');
+      const svgFile=new File([plan.text],file.name.replace(/\.dwg$/i,'')+`-${floor.id}.svg`,{type:'image/svg+xml'});
+      const fd=new FormData();
+      fd.append('file',svgFile);fd.append('project_id',project.id);fd.append('building_id',building.id);fd.append('floor_id',floor.id);
+      fd.append('asset_type','floor-plan-cad-svg');fd.append('label',`${floor.name} · plan CAD`);
+      const preview=await api('/admin/upload/floor-plans',{method:'POST',body:fd});
 
-      const svgFd=new FormData();
-      svgFd.append('file',svgFile);
-      svgFd.append('project_id',project.id);
-      svgFd.append('building_id',building.id);
-      svgFd.append('floor_id',floor.id);
-      svgFd.append('asset_type','floor-plan-cad-svg');
-      svgFd.append('label',`${floor.name} · plan CAD decupat`);
-      const preview=await api('/admin/upload/floor-plans',{method:'POST',body:svgFd});
+      const settings={...(floor.settings||{}),cad:{
+        version:'04.2.0',source_file:file.name,source_bucket:raw.bucket,source_path:raw.path,
+        crop_world:[cropWorld.minX,cropWorld.minY,cropWorld.maxX,cropWorld.maxY],
+        segments:geometry.segments,texts:geometry.texts,door_hints:geometry.doors,
+        segment_count:geometry.segments.length,map_debug:mapping?.debug||null,imported_at:new Date().toISOString()
+      }};
 
-      setStage('Configurez editorul de poligoane…');
-
-      const settings={
-        ...(floor.settings||{}),
-        cad:{
-          version:'04.0.2',
-          source_file:file.name,
-          source_bucket:raw.bucket,
-          source_path:raw.path,
-          svg_path:preview.path,
-          svg_url:preview.url,
-
-          // Full DWG world coordinates are preserved here, never forced into integer DB fields.
-          original_view_box:[
-            cropped.originalViewBox.x,
-            cropped.originalViewBox.y,
-            cropped.originalViewBox.width,
-            cropped.originalViewBox.height
-          ],
-          crop_normalized:[
-            selected.x,selected.y,selected.w,selected.h
-          ],
-          crop_view_box:[
-            cropped.cropViewBox.x,
-            cropped.cropViewBox.y,
-            cropped.cropViewBox.width,
-            cropped.cropViewBox.height
-          ],
-
-          entity_count:geometry.entityCount,
-          segments:geometry.segments,
-          texts:geometry.texts||[],
-          segment_count:geometry.segments.length,
-          map_debug:mapping?.debug||null,
-          imported_at:new Date().toISOString()
-        }
-      };
-
-      await api(`/admin/floors/${floor.id}`,{
-        method:'PATCH',
-        body:{
-          plan_path:preview.url,
-
-          // IMPORTANT: Supabase columns are integers. Never put DWG world coordinates here.
-          plan_width:Math.round(cropped.previewWidth),
-          plan_height:Math.round(cropped.previewHeight),
-          settings
-        }
-      });
+      await api(`/admin/floors/${floor.id}`,{method:'PATCH',body:{plan_path:preview.url,plan_width:plan.width,plan_height:plan.height,settings}});
 
       if(mapping?.detections?.length){
-        setStage(`Salvez ${mapping.detections.length} poligoane de apartament…`);
-        await api(`/admin/floors/${floor.id}/cad-map`,{
-          method:'POST',
-          body:{
-            apartments:mapping.detections.map(d=>({
-              code:d.code,
-              points:d.points,
-              room_count:d.roomCount||0
-            }))
-          }
-        });
+        setStage(`Salvez ${mapping.detections.length} apartamente și poligoanele lor…`);
+        await api(`/admin/floors/${floor.id}/cad-map`,{method:'POST',body:{apartments:mapping.detections.map(d=>({code:d.code,points:d.points,room_count:d.roomCount||0}))}});
       }
 
       setStage('Plan CAD și poligoane salvate.');
       await onImported?.();
-      clearPreviewUrl();
       setTimeout(()=>onClose?.(),450);
-    }catch(e){
-      console.error(e);
-      setError(e.message||String(e));
-      setStage('');
-    }finally{
-      setBusy(false);
-    }
+    }catch(e){console.error(e);setError(e.message||String(e));setStage('')}
+    finally{setBusy(false)}
   }
 
-  function resetPrepared(){
-    clearPreviewUrl();
-    setPrepared(null);
-    setStats(null);
-    setCadData(null);
-    setMapping(null);
-    setStage('');
-    setError('');
-    setCrop({x:0,y:0,w:1,h:1});
-  }
-
-  const cropStyle={
-    left:`${crop.x*100}%`,
-    top:`${crop.y*100}%`,
-    width:`${crop.w*100}%`,
-    height:`${crop.h*100}%`
-  };
+  const normCrop=cropWorld&&viewerBbox?normalizeWorldCrop(cropWorld,viewerBbox):null;
 
   return <div className="modal">
-    <div className="modal-card cad-import-modal cad-crop-modal">
+    <div className="modal-card cad-import-modal cad-crop-modal cad-real-modal">
       <button className="x" onClick={onClose} disabled={busy}>×</button>
-
-      <small className="kicker">CAD FLOOR WORKFLOW</small>
-      <h2>{prepared?'Selectează planul etajului':'Importă plan DWG'}</h2>
+      <small className="kicker">CAD FLOOR WORKFLOW · REAL DXF VIEWER</small>
+      <h2>{prepared?'Selectează etajul și mapează apartamentele':'Importă DWG'}</h2>
 
       {!prepared&&<>
-        <p>
-          DWG-ul poate conține mai multe planuri pe aceeași planșă. Îl deschidem întâi complet,
-          apoi alegi cu mouse-ul exact planul etajului pe care vrei să-l folosești.
-        </p>
-
-        {sourceName&&<div className="cad-current">
-          <b>Plan CAD actual</b>
-          <span>{sourceName}</span>
-        </div>}
-
+        <p>DWG-ul este convertit intern în DXF și afișat cu un renderer CAD adevărat, nu cu vechiul SVG LibreDWG. Asta păstrează mult mai bine pereții, blocurile, hatch-urile și planurile mari.</p>
+        {sourceName&&<div className="cad-current"><b>Plan CAD actual</b><span>{sourceName}</span></div>}
         <label className="cad-drop">
-          <input
-            type="file"
-            accept=".dwg,application/acad,application/x-acad,application/autocad_dwg,image/vnd.dwg"
-            onChange={e=>{
-              setFile(e.target.files?.[0]||null);
-              setError('');
-            }}
-          />
+          <input type="file" accept=".dwg" onChange={e=>{setFile(e.target.files?.[0]||null);setError('')}}/>
           <b>{file?file.name:'Alege fișierul .DWG'}</b>
-          <span>{file?`${(file.size/1024/1024).toFixed(1)} MB`:'DWG 2D · poate conține mai multe planuri'}</span>
+          <span>{file?`${(file.size/1024/1024).toFixed(1)} MB`:'DWG 2D · un plan sau o planșă mare'}</span>
         </label>
-
-        <div className="cad-flow">
-          <span>DWG complet</span><i>→</i><span>Selectezi etajul</span><i>→</i><span>SVG decupat</span><i>→</i><span>CAD Snap</span>
-        </div>
       </>}
 
       {prepared&&<>
-        <p className="cad-crop-help">
-          Trage un dreptunghi <b>doar peste planul etajului dorit</b>. Restul planșei nu va intra
-          în editor și nici în geometria de snap.
-        </p>
+        <div className="cad-real-toolbar">
+          <button onClick={()=>{try{viewer?.curView?.zoomToFitDrawing?.(10000)}catch{}}}>Încadrează tot</button>
+          <button className={selecting?'active primary':''} onClick={()=>{setSelecting(v=>!v);setScreenCrop(null);setDragStart(null)}}>{selecting?'Trage dreptunghiul…':'Selectează etajul'}</button>
+          <button onClick={useWholeDrawing}>Folosește tot desenul</button>
+        </div>
 
-        <div
-          className="cad-sheet-preview"
-          onPointerDown={cropStart}
-          onPointerMove={cropMove}
-          onPointerUp={cropEnd}
-          onPointerCancel={cropEnd}
-        >
-          <img src={previewUrl} alt="Previzualizare DWG complet"/>
-
-          {mapping&&<svg className="cad-map-overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none">
-            {showWalls&&(cadData?.geometry?.segments||[]).slice(0,6000).map((seg,i)=>
-              <line key={'wall'+i}
-                x1={(crop.x+seg[0]*crop.w)*1000}
-                y1={(crop.y+seg[1]*crop.h)*1000}
-                x2={(crop.x+seg[2]*crop.w)*1000}
-                y2={(crop.y+seg[3]*crop.h)*1000}
-                className="cad-wall-debug"/>
-            )}
-            {mapping.detections.map((d,i)=>
-              <g key={'apt'+i}>
-                <polygon
-                  points={d.points.map(p=>`${(crop.x+p.x*crop.w)*1000},${(crop.y+p.y*crop.h)*1000}`).join(' ')}
-                  className="cad-apartment-map"
-                />
-                <text
-                  x={(crop.x+d.cx*crop.w)*1000}
-                  y={(crop.y+d.cy*crop.h)*1000}
-                  className="cad-apartment-label"
-                >{d.code}</text>
-              </g>
-            )}
-          </svg>}
-
-          <div className="cad-crop-rect" style={cropStyle}>
-            <span>PLAN SELECTAT</span>
+        <div className="cad-real-shell">
+          <CadTrueViewer dxfBytes={prepared.dxfBytes} onReady={viewerReady} onError={e=>setError(e.message||String(e))}/>
+          <div className={`cad-world-crop-layer ${selecting?'active':''}`} onPointerDown={startCrop} onPointerMove={moveCrop} onPointerUp={endCrop} onPointerCancel={endCrop}>
+            {screenCrop&&<div className="cad-screen-crop" style={{left:screenCrop.x,top:screenCrop.y,width:screenCrop.w,height:screenCrop.h}}><span>ETAJ SELECTAT</span></div>}
           </div>
         </div>
 
         <div className="cad-selection-info">
-          <span>X {Math.round(crop.x*100)}%</span>
-          <span>Y {Math.round(crop.y*100)}%</span>
-          <span>W {Math.round(crop.w*100)}%</span>
-          <span>H {Math.round(crop.h*100)}%</span>
-          <button onClick={()=>setCrop({x:0,y:0,w:1,h:1})} disabled={busy}>Toată planșa</button>
-        </div>
-
-        <div className="cad-important">
-          DWG-ul original rămâne salvat integral. Pentru etaj folosim numai selecția de mai sus.
+          {normCrop?<><span>X {Math.round(normCrop.x*100)}%</span><span>Y {Math.round(normCrop.y*100)}%</span><span>W {Math.round(normCrop.w*100)}%</span><span>H {Math.round(normCrop.h*100)}%</span></>:<span>Nicio zonă selectată încă</span>}
         </div>
 
         <div className="cad-map-actions">
-          <button className="primary" onClick={analyzeCadSelection} disabled={busy}>
-            {busy?'Analizez CAD…':'Mapează apartamentele din DWG'}
-          </button>
-          {mapping&&<button className={showWalls?'active':''} onClick={()=>setShowWalls(v=>!v)}>
-            {showWalls?'Ascunde pereții CAD':'Arată pereții CAD'}
-          </button>}
+          <button className="primary" onClick={analyze} disabled={!cropWorld||busy}>{busy?'Analizez…':'Mapează apartamentele'}</button>
+          {mapping&&<button className={showWalls?'active':''} onClick={()=>setShowWalls(v=>!v)}>{showWalls?'Ascunde linework':'Arată linework CAD'}</button>}
         </div>
 
         {mapping&&<div className="cad-map-report">
           <b>{mapping.detections.length} apartamente propuse</b>
           <span>{mapping.debug.structuralSegments} segmente structurale</span>
-          <span>{mapping.debug.rooms} camere/celule</span>
-          <span>{mapping.debug.doors} conexiuni de ușă</span>
+          <span>{mapping.debug.rooms} camere</span>
+          <span>{mapping.debug.doors} conexiuni</span>
+          <span>{mapping.debug.doorHints||0} uși din arce CAD</span>
           <span>{mapping.debug.commonIds.length} zone comune</span>
+        </div>}
+
+        {mapPreview&&<div className="cad-result-preview">
+          <img src={mapPreview} alt="Plan CAD reconstruit"/>
+          {mapping&&<svg viewBox="0 0 1000 1000" preserveAspectRatio="none">
+            {showWalls&&(geometry?.segments||[]).slice(0,12000).map((s,i)=><line key={'s'+i} x1={s[0]*1000} y1={s[1]*1000} x2={s[2]*1000} y2={s[3]*1000} className="cad-wall-debug"/>)}
+            {mapping.detections.map((d,i)=><g key={'d'+i}><polygon points={d.points.map(p=>`${p.x*1000},${p.y*1000}`).join(' ')} className="cad-apartment-map"/><text x={d.cx*1000} y={d.cy*1000} className="cad-apartment-label">{d.code}</text></g>)}
+          </svg>}
         </div>}
       </>}
 
       {stage&&<div className="info-box">{stage}</div>}
-      {stats&&<div className="success-box">
-        {stats.entities.toLocaleString('ro-RO')} entități SVG în sursă · {stats.segments.toLocaleString('ro-RO')} segmente CAD în selecție
-      </div>}
       {error&&<div className="error-box">{error}</div>}
 
       <div className="modal-actions">
-        {prepared
-          ? <>
-              <button onClick={resetPrepared} disabled={busy}>← Alt DWG</button>
-              <button className="primary" onClick={saveCadSelection} disabled={busy||crop.w<.002||crop.h<.002}>
-                {busy?'Salvez planul…':mapping?.detections?.length?`Salvează + creează ${mapping.detections.length} apartamente`:'Salvează doar planul'}
-              </button>
-            </>
-          : <>
-              <button onClick={onClose} disabled={busy}>Renunță</button>
-              <button className="primary" onClick={prepareCad} disabled={!file||busy}>
-                {busy?'Deschid DWG-ul…':'Deschide DWG-ul'}
-              </button>
-            </>
-        }
+        {prepared?<><button onClick={()=>{setPrepared(null);setViewer(null);setCropWorld(null);setGeometry(null);setMapping(null);cleanupPreview()}} disabled={busy}>← Alt DWG</button><button className="primary" onClick={save} disabled={busy||!geometry}>{busy?'Salvez…':mapping?.detections?.length?`Salvează ${mapping.detections.length} apartamente`:'Salvează planul'}</button></>:<><button onClick={onClose} disabled={busy}>Renunță</button><button className="primary" onClick={prepareCad} disabled={!file||busy}>{busy?'Pregătesc…':'Deschide DWG-ul'}</button></>}
       </div>
 
-      <small className="cad-license-note">
-        Coordonatele CAD reale pot avea valori foarte mari și zecimale. Ele sunt păstrate în metadata CAD;
-        câmpurile de preview din baza de date primesc doar dimensiuni normalizate întregi.
-      </small>
+      <small className="cad-license-note">Viewerul deschide DXF-ul intermediar folosind renderer CAD. Maparea folosește LINE/LWPOLYLINE/ARC/INSERT/TEXT din DXF; arcele de ușă sunt folosite explicit pentru a lega camerele aceluiași apartament.</small>
     </div>
   </div>;
 }

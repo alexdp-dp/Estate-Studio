@@ -16,7 +16,8 @@
     "react-konva": "^18.2.10",
     "react-router-dom": "^6.28.0",
     "three": "^0.169.0",
-    "@mlightcad/libredwg-web": "^0.7.10"
+    "@mlightcad/libredwg-web": "^0.7.10",
+    "@mlightcad/cad-simple-viewer": "^1.7.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.3",

@@ -1,3 +1,31 @@
+# Estate Studio — Build 04.2.0 Real CAD Viewer + Door Graph
+
+Două corecții majore față de 04.1.0.
+
+## 1. DWG-ul se vede printr-un viewer CAD real
+- DWG → DXF cu LibreDWG;
+- DXF-ul este deschis în `@mlightcad/cad-simple-viewer`;
+- nu mai folosim SVG-ul incomplet LibreDWG drept ecran principal;
+- suport mult mai bun pentru planuri mari, blocuri, linework și layout;
+- zoom/pan real;
+- selecția etajului se face direct peste viewer, în coordonate CAD world.
+
+## 2. Maparea nu mai tratează fiecare cameră drept apartament
+- DXF-ul este citit direct pentru LINE / LWPOLYLINE / ARC / INSERT / TEXT / MTEXT;
+- blocurile INSERT sunt expandate recursiv;
+- arcele de ușă sunt extrase explicit ca `doorHints`;
+- fiecare arc de ușă care separă două camere creează o muchie în graful de conectivitate;
+- pragul de gap pentru uși este mai permisiv;
+- conexiunile nu mai cer dovadă duplicată (`count >= 1`);
+- holul comun poate fi extins peste mai multe celule despărțite de lift/scară;
+- după eliminarea holului comun, camerele conectate prin uși sunt grupate ca UN SINGUR apartament;
+- balconul rămâne în același grup când există ușă către apartament.
+
+## Preview salvat
+Planul etajului este reconstruit ca SVG din geometria DXF selectată, nu din vechiul `dwg_to_svg`.
+
+`/api/version` => `04.2.0-real-cad-door-graph`
+
 # Estate Studio — Build 04.1.0 DWG Apartment Mapping
 
 Corecție de concept: importul DWG nu mai este doar viewer + snap.
