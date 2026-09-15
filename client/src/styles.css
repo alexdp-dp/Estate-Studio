@@ -472,3 +472,48 @@ a.primary:hover,
   vector-effect:non-scaling-stroke;
   pointer-events:none;
 }
+
+
+/* 04.4.7 — public floor-plan polygon UX
+   Keep technical black linework readable through status overlays. */
+.plan-image-wrap{
+  isolation:isolate;
+}
+.plan-public .plan-image-wrap svg{
+  pointer-events:auto;
+}
+.plan-public .plan-image-wrap polygon{
+  mix-blend-mode:multiply;
+  stroke:none !important;
+  stroke-width:0 !important;
+  vector-effect:none;
+  transition:fill .14s ease, opacity .14s ease, filter .14s ease;
+  filter:none;
+}
+.plan-public .plan-image-wrap polygon.available{
+  fill:rgba(26,187,100,.34);
+}
+.plan-public .plan-image-wrap polygon.reserved{
+  fill:rgba(228,161,44,.34);
+}
+.plan-public .plan-image-wrap polygon.sold{
+  fill:rgba(215,76,76,.34);
+}
+.plan-public .plan-image-wrap polygon:hover,
+.plan-public .plan-image-wrap polygon.hovered{
+  stroke:none !important;
+  stroke-width:0 !important;
+  filter:none !important;
+}
+.plan-public .plan-image-wrap polygon.available:hover,
+.plan-public .plan-image-wrap polygon.available.hovered{
+  fill:rgba(10,154,76,.54);
+}
+.plan-public .plan-image-wrap polygon.reserved:hover,
+.plan-public .plan-image-wrap polygon.reserved.hovered{
+  fill:rgba(198,130,16,.54);
+}
+.plan-public .plan-image-wrap polygon.sold:hover,
+.plan-public .plan-image-wrap polygon.sold.hovered{
+  fill:rgba(190,49,49,.54);
+}

@@ -1,3 +1,19 @@
+# Estate Studio — Build 04.4.7 Public Plan Multiply
+
+Update exclusiv de UX pentru viewerul public al planului de etaj. Detectorul și editorul nu sunt modificate.
+
+## Poligoane în viewerul public
+- `mix-blend-mode: multiply` peste planul PNG;
+- zonele negre ale planului rămân vizibile / negre prin overlay;
+- fără chenar alb;
+- fără chenar negru la hover;
+- `stroke: none` permanent;
+- la hover se schimbă doar nuanța / intensitatea culorii de status;
+- culorile Available / Reserved / Sold rămân distincte;
+- blend-ul este izolat în zona planului ca să nu afecteze restul UI-ului.
+
+`/api/version` => `04.4.7-public-plan-multiply`
+
 # Estate Studio — Build 04.4.6 Strict Orthogonal Corners
 
 Build cumulativ peste 04.4.5. Detectorul / maparea apartamentelor NU este schimbată.
