@@ -1,5 +1,6 @@
 import React,{useMemo,useState} from 'react';
 import {api} from '../api';
+import {mapApartmentsFromCad} from '../cadTopology';
 
 let librePromise=null;
 
@@ -270,6 +271,7 @@ async function extractCadSegments(svgText,crop={x:0,y:0,w:1,h:1}){
   }
 
   const segments=[];
+  const texts=[];
   let entityCount=0;
 
   const activeCrop=normalizeCrop(crop);
@@ -296,7 +298,7 @@ async function extractCadSegments(svgText,crop={x:0,y:0,w:1,h:1}){
     ]);
   }
 
-  const elements=[...liveSvg.querySelectorAll('line,polyline,polygon,rect,path,circle,ellipse')];
+  const elements=[...liveSvg.querySelectorAll('line,polyline,polygon,rect,path,circle,ellipse,text')];
 
   for(const el of elements){
     if(el.getAttribute('data-estate-studio-background')==='1')continue;
@@ -333,6 +335,21 @@ async function extractCadSegments(svgText,crop={x:0,y:0,w:1,h:1}){
         continue;
       }
 
+      if(tag==='text'){
+        const box=el.getBBox?.();
+        if(box){
+          const p=rootPoint(el,box.x+box.width/2,box.y+box.height/2);
+          if(p){
+            texts.push({
+              text:String(el.textContent||'').trim(),
+              x:(p.x-activeCrop.x)/activeCrop.w,
+              y:(p.y-activeCrop.y)/activeCrop.h
+            });
+          }
+        }
+        continue;
+      }
+
       if(typeof el.getTotalLength==='function'){
         const total=el.getTotalLength();
         if(!Number.isFinite(total)||total<=0)continue;
@@ -358,6 +375,7 @@ async function extractCadSegments(svgText,crop={x:0,y:0,w:1,h:1}){
 
   return {
     segments:dedupeSegments(segments),
+    texts:texts.filter(t=>t.text&&t.x>=0&&t.x<=1&&t.y>=0&&t.y<=1),
     entityCount
   };
 }
@@ -408,6 +426,9 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
   const [stage,setStage]=useState('');
   const [error,setError]=useState('');
   const [stats,setStats]=useState(null);
+  const [cadData,setCadData]=useState(null);
+  const [mapping,setMapping]=useState(null);
+  const [showWalls,setShowWalls]=useState(false);
 
   // Prepared DWG stays in browser until user chooses the actual floor plan from the sheet.
   const [prepared,setPrepared]=useState(null);
@@ -464,6 +485,7 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
 
   function cropStart(e){
     if(!prepared||busy)return;
+    setMapping(null);setCadData(null);
     e.currentTarget.setPointerCapture?.(e.pointerId);
     const p=pointerNorm(e);
     setDragStart(p);
@@ -472,6 +494,7 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
 
   function cropMove(e){
     if(!dragStart||!prepared||busy)return;
+    setMapping(null);setCadData(null);
     const p=pointerNorm(e);
     const x=Math.min(dragStart.x,p.x);
     const y=Math.min(dragStart.y,p.y);
@@ -486,16 +509,49 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
     setDragStart(null);
   }
 
+  async function analyzeCadSelection(){
+    if(!prepared)return;
+    setBusy(true);setError('');setStats(null);setMapping(null);
+
+    try{
+      const selected=normalizeCrop(crop);
+      setStage('Citesc pereții, ușile și textele din geometria DWG…');
+
+      const geometry=await extractCadSegments(prepared.text,selected);
+      if(!geometry.segments.length)throw new Error('Nu am găsit linii CAD în selecție.');
+
+      const cropped=cropSvgDocument(prepared.text,selected);
+      const aspect=cropped.previewWidth/Math.max(1,cropped.previewHeight);
+      const mapped=mapApartmentsFromCad(geometry.segments,geometry.texts||[],aspect);
+
+      setCadData({geometry,cropped,selected});
+      setMapping(mapped);
+      setStats({entities:geometry.entityCount,segments:geometry.segments.length});
+
+      setStage(
+        mapped.detections.length
+          ? `Mapare CAD: ${mapped.detections.length} apartamente propuse.`
+          : 'Am citit geometria, dar nu am reușit să separ apartamentele automat.'
+      );
+    }catch(e){
+      console.error(e);
+      setError(e.message||String(e));
+      setStage('');
+    }finally{
+      setBusy(false);
+    }
+  }
+
   async function saveCadSelection(){
     if(!file||!prepared)return;
     setBusy(true);setError('');setStats(null);
 
     try{
       const selected=normalizeCrop(crop);
-      const cropped=cropSvgDocument(prepared.text,selected);
+      const cropped=cadData?.cropped||cropSvgDocument(prepared.text,selected);
 
       setStage('Extrag doar geometria CAD din zona selectată…');
-      const geometry=await extractCadSegments(prepared.text,selected);
+      const geometry=cadData?.geometry||await extractCadSegments(prepared.text,selected);
 
       setStats({
         entities:geometry.entityCount,
@@ -566,7 +622,9 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
 
           entity_count:geometry.entityCount,
           segments:geometry.segments,
+          texts:geometry.texts||[],
           segment_count:geometry.segments.length,
+          map_debug:mapping?.debug||null,
           imported_at:new Date().toISOString()
         }
       };
@@ -583,7 +641,21 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
         }
       });
 
-      setStage('Plan CAD salvat.');
+      if(mapping?.detections?.length){
+        setStage(`Salvez ${mapping.detections.length} poligoane de apartament…`);
+        await api(`/admin/floors/${floor.id}/cad-map`,{
+          method:'POST',
+          body:{
+            apartments:mapping.detections.map(d=>({
+              code:d.code,
+              points:d.points,
+              room_count:d.roomCount||0
+            }))
+          }
+        });
+      }
+
+      setStage('Plan CAD și poligoane salvate.');
       await onImported?.();
       clearPreviewUrl();
       setTimeout(()=>onClose?.(),450);
@@ -600,6 +672,8 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
     clearPreviewUrl();
     setPrepared(null);
     setStats(null);
+    setCadData(null);
+    setMapping(null);
     setStage('');
     setError('');
     setCrop({x:0,y:0,w:1,h:1});
@@ -662,6 +736,31 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
           onPointerCancel={cropEnd}
         >
           <img src={previewUrl} alt="Previzualizare DWG complet"/>
+
+          {mapping&&<svg className="cad-map-overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none">
+            {showWalls&&(cadData?.geometry?.segments||[]).slice(0,6000).map((seg,i)=>
+              <line key={'wall'+i}
+                x1={(crop.x+seg[0]*crop.w)*1000}
+                y1={(crop.y+seg[1]*crop.h)*1000}
+                x2={(crop.x+seg[2]*crop.w)*1000}
+                y2={(crop.y+seg[3]*crop.h)*1000}
+                className="cad-wall-debug"/>
+            )}
+            {mapping.detections.map((d,i)=>
+              <g key={'apt'+i}>
+                <polygon
+                  points={d.points.map(p=>`${(crop.x+p.x*crop.w)*1000},${(crop.y+p.y*crop.h)*1000}`).join(' ')}
+                  className="cad-apartment-map"
+                />
+                <text
+                  x={(crop.x+d.cx*crop.w)*1000}
+                  y={(crop.y+d.cy*crop.h)*1000}
+                  className="cad-apartment-label"
+                >{d.code}</text>
+              </g>
+            )}
+          </svg>}
+
           <div className="cad-crop-rect" style={cropStyle}>
             <span>PLAN SELECTAT</span>
           </div>
@@ -678,6 +777,23 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
         <div className="cad-important">
           DWG-ul original rămâne salvat integral. Pentru etaj folosim numai selecția de mai sus.
         </div>
+
+        <div className="cad-map-actions">
+          <button className="primary" onClick={analyzeCadSelection} disabled={busy}>
+            {busy?'Analizez CAD…':'Mapează apartamentele din DWG'}
+          </button>
+          {mapping&&<button className={showWalls?'active':''} onClick={()=>setShowWalls(v=>!v)}>
+            {showWalls?'Ascunde pereții CAD':'Arată pereții CAD'}
+          </button>}
+        </div>
+
+        {mapping&&<div className="cad-map-report">
+          <b>{mapping.detections.length} apartamente propuse</b>
+          <span>{mapping.debug.structuralSegments} segmente structurale</span>
+          <span>{mapping.debug.rooms} camere/celule</span>
+          <span>{mapping.debug.doors} conexiuni de ușă</span>
+          <span>{mapping.debug.commonIds.length} zone comune</span>
+        </div>}
       </>}
 
       {stage&&<div className="info-box">{stage}</div>}
@@ -691,7 +807,7 @@ export default function CadPlanImporter({project,building,floor,onClose,onImport
           ? <>
               <button onClick={resetPrepared} disabled={busy}>← Alt DWG</button>
               <button className="primary" onClick={saveCadSelection} disabled={busy||crop.w<.002||crop.h<.002}>
-                {busy?'Salvez planul…':'Folosește această selecție'}
+                {busy?'Salvez planul…':mapping?.detections?.length?`Salvează + creează ${mapping.detections.length} apartamente`:'Salvează doar planul'}
               </button>
             </>
           : <>

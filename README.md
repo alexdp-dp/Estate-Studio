@@ -1,3 +1,41 @@
+# Estate Studio — Build 04.1.0 DWG Apartment Mapping
+
+Corecție de concept: importul DWG nu mai este doar viewer + snap.
+
+## Flux
+1. Importă DWG.
+2. Selectează planul etajului din planșă.
+3. `Mapează apartamentele din DWG`.
+4. Estate Studio folosește segmentele vectoriale CAD și TEXT/MTEXT din DWG.
+5. Filtrează linework-ul structural.
+6. Închide virtual golurile de ușă.
+7. Separă camerele/celulele.
+8. Construiește graful conexiunilor prin uși.
+9. Caută holul comun:
+   - întâi după texte CAD: HOL COMUN, CORIDOR, PALIER, CASA SCĂRII, LIFT etc.;
+   - fallback: conectivitate + poziție.
+10. Scoate zona comună.
+11. Camerele interconectate rămase devin apartamente.
+12. Balcoanele rămân în același apartament dacă au conexiune de ușă.
+13. Dacă există AP.01 / AP.02 ca text CAD, codurile sunt folosite fără OCR.
+14. La salvare, creează automat apartamentele și `apartment_polygons`.
+
+## Debug
+- `Arată pereții CAD` afișează albastru exact segmentele vectoriale folosite.
+- Poligoanele propuse apar verde înainte de salvare.
+- Raportul arată:
+  - segmente structurale;
+  - camere/celule;
+  - conexiuni de ușă;
+  - zone comune;
+  - apartamente propuse.
+
+## Important
+Vechiul `Detectează apartamente` raster rămâne eliminat.
+Maparea este acum parte din workflow-ul DWG.
+
+`/api/version` => `04.1.0-dwg-apartment-mapping`
+
 # Estate Studio — Build 04.0.3 Integer Floor Dimensions Fix
 
 Fix definitiv pentru erori de forma:

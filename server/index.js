@@ -16,7 +16,7 @@ function verifyPassword(password,record){const [,it,salt64,hash64]=record.split(
 function auth(req,res,next){try{req.user=jwt.verify(req.cookies.es_token,JWT_SECRET);next()}catch{res.status(401).json({error:'Unauthorized'})}}
 function clean(o,allowed){return Object.fromEntries(Object.entries(o||{}).filter(([k])=>allowed.includes(k)))}
 function send(res,data,error,status=500){if(error)return res.status(status).json({error:error.message||String(error)});res.json(data)}
-app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.0.3-integer-floor-dimensions-fix',time:'2026-09-14'}));
+app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.1.0-dwg-apartment-mapping',time:'2026-09-14'}));
 app.get('/api/health',async(req,res)=>{const {error}=await sb.from('projects').select('id',{head:true,count:'exact'});res.status(error?500:200).json({ok:!error,supabase:!error,error:error?.message})});
 app.post('/api/auth/login',(req,res)=>{if(req.body?.username===ADMIN_USER&&verifyPassword(String(req.body?.password||''),ADMIN_HASH)){const token=jwt.sign({sub:ADMIN_USER},JWT_SECRET,{expiresIn:'24h'});res.cookie('es_token',token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',maxAge:86400000});return res.json({ok:true,user:ADMIN_USER})}res.status(401).json({error:'User sau parolă incorecte'})});
 app.get('/api/auth/me',auth,(req,res)=>res.json({user:req.user.sub}));
@@ -79,6 +79,66 @@ app.post('/api/admin/apartments',auth,async(req,res)=>{const {data,error}=await 
 app.patch('/api/admin/apartments/:id',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').update(clean(req.body,apartmentAllowed)).eq('id',req.params.id).select().single();send(res,data,error)});
 app.delete('/api/admin/apartments/:id',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').delete().eq('id',req.params.id).select();send(res,data,error)});
 app.put('/api/admin/apartments/:id/polygon',auth,async(req,res)=>{const points=(req.body.points||[]).map(p=>({x:Math.max(0,Math.min(1,Number(p.x))),y:Math.max(0,Math.min(1,Number(p.y)))}));const {data,error}=await sb.from('apartment_polygons').upsert({apartment_id:req.params.id,points},{onConflict:'apartment_id'}).select().single();send(res,data,error)});
+app.post('/api/admin/floors/:id/cad-map',auth,async(req,res)=>{
+  try{
+    const floorId=req.params.id;
+    const proposals=Array.isArray(req.body?.apartments)?req.body.apartments:[];
+
+    const {data:existing,error:ee}=await sb.from('apartments')
+      .select('id,code,title,settings')
+      .eq('floor_id',floorId);
+    if(ee)throw ee;
+
+    const byCode=new Map((existing||[]).map(a=>[String(a.code||'').toUpperCase(),a]));
+    const out=[];
+
+    for(let i=0;i<proposals.length;i++){
+      const p=proposals[i]||{};
+      const code=String(p.code||`A${String(i+1).padStart(2,'0')}`).trim();
+      const key=code.toUpperCase();
+      let apartment=byCode.get(key);
+
+      if(!apartment){
+        const {data:created,error:ce}=await sb.from('apartments').insert({
+          floor_id:floorId,
+          code,
+          title:code,
+          status:'available',
+          settings:{cad_auto_mapped:true,room_count:Number(p.room_count)||0}
+        }).select().single();
+        if(ce)throw ce;
+        apartment=created;
+        byCode.set(key,created);
+      }else{
+        const nextSettings={...(apartment.settings||{}),cad_auto_mapped:true,room_count:Number(p.room_count)||0};
+        const {error:ue}=await sb.from('apartments').update({settings:nextSettings}).eq('id',apartment.id);
+        if(ue)throw ue;
+      }
+
+      const points=(p.points||[])
+        .map(pt=>({
+          x:Math.max(0,Math.min(1,Number(pt.x))),
+          y:Math.max(0,Math.min(1,Number(pt.y)))
+        }))
+        .filter(pt=>Number.isFinite(pt.x)&&Number.isFinite(pt.y));
+
+      if(points.length>=3){
+        const {error:pe}=await sb.from('apartment_polygons').upsert(
+          {apartment_id:apartment.id,points},
+          {onConflict:'apartment_id'}
+        );
+        if(pe)throw pe;
+      }
+
+      out.push({id:apartment.id,code,points:points.length});
+    }
+
+    res.json({ok:true,apartments:out});
+  }catch(e){
+    send(res,null,e);
+  }
+});
+
 
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:100*1024*1024}});const buckets=new Set(['models','floor-plans','project-images','apartment-images','project-documents']);
 app.post('/api/admin/upload/:bucket',auth,upload.single('file'),async(req,res)=>{try{const bucket=req.params.bucket;if(!buckets.has(bucket))return res.status(400).json({error:'Bucket invalid'});if(!req.file)return res.status(400).json({error:'Fișier lipsă'});const safe=req.file.originalname.replace(/[^a-zA-Z0-9._-]+/g,'-');const prefix=[req.body.project_id,req.body.building_id,req.body.floor_id,req.body.apartment_id].filter(Boolean).join('/');const objectPath=`${prefix?prefix+'/':''}${Date.now()}-${safe}`;const {error}=await sb.storage.from(bucket).upload(objectPath,req.file.buffer,{contentType:req.file.mimetype,upsert:false});if(error)throw error;let url=null;if(bucket!=='project-documents')url=sb.storage.from(bucket).getPublicUrl(objectPath).data.publicUrl;const asset={project_id:req.body.project_id||null,building_id:req.body.building_id||null,floor_id:req.body.floor_id||null,apartment_id:req.body.apartment_id||null,asset_type:req.body.asset_type||'upload',storage_bucket:bucket,storage_path:objectPath,label:req.body.label||req.file.originalname,file_name:req.file.originalname,mime_type:req.file.mimetype,file_size:Math.round(Number(req.file.size)||0),metadata:{}};if(asset.project_id)await sb.from('project_assets').insert(asset);res.json({bucket,path:objectPath,url,file_name:req.file.originalname})}catch(e){send(res,null,e)}});
