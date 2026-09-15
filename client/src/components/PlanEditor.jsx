@@ -154,7 +154,10 @@ export default function PlanEditor({floor,onChanged}){
   const viewportRef=useRef();
   const panWasDragging=useRef(false);
   const vertexDragging=useRef(false);
+  const editGesture=useRef(null);
   const draftRef=useRef([]);
+  const spaceHeld=useRef(false);
+  const tempPan=useRef({active:false,startPointer:null,startPos:null});
   const image=useHtmlImage(floor?.plan_path);
 
   const [size,setSize]=useState({w:900,h:600});
@@ -170,6 +173,8 @@ export default function PlanEditor({floor,onChanged}){
   const [snapVertices,setSnapVertices]=useState(true);
   const [snapEdit,setSnapEdit]=useState(false);
   const [selectedVertex,setSelectedVertex]=useState(null);
+  const [selectedEdge,setSelectedEdge]=useState(null);
+  const [hoverEdge,setHoverEdge]=useState(null);
 
   const selected=(floor?.apartments||[]).find(a=>a.id===selectedId);
 
@@ -196,20 +201,51 @@ export default function PlanEditor({floor,onChanged}){
     draftRef.current=ps;
     setDraft(ps);
     setSelectedVertex(null);
+    setSelectedEdge(null);
+    setHoverEdge(null);
     setNotice('');
   },[selectedId,selected?.apartment_polygons]);
 
   useEffect(()=>{
+    function setStageCursor(cursor){
+      const c=stageRef.current?.container?.();
+      if(c)c.style.cursor=cursor;
+    }
     function onKeyDown(e){
       const tag=(e.target?.tagName||'').toLowerCase();
       if(tag==='input'||tag==='textarea'||tag==='select')return;
+      if(e.code==='Space'){
+        e.preventDefault();
+        if(!spaceHeld.current){
+          spaceHeld.current=true;
+          if(!tempPan.current.active)setStageCursor('grab');
+        }
+        return;
+      }
       if((e.key==='Delete'||e.key==='Backspace')&&selectedVertex!==null){
         e.preventDefault();
         deleteVertex(selectedVertex);
       }
     }
+    function onKeyUp(e){
+      if(e.code==='Space'){
+        spaceHeld.current=false;
+        if(!tempPan.current.active)setStageCursor('default');
+      }
+    }
+    function onBlur(){
+      spaceHeld.current=false;
+      if(tempPan.current.active)endTemporaryPan();
+      setStageCursor('default');
+    }
     window.addEventListener('keydown',onKeyDown);
-    return()=>window.removeEventListener('keydown',onKeyDown);
+    window.addEventListener('keyup',onKeyUp);
+    window.addEventListener('blur',onBlur);
+    return()=>{
+      window.removeEventListener('keydown',onKeyDown);
+      window.removeEventListener('keyup',onKeyUp);
+      window.removeEventListener('blur',onBlur);
+    };
   },[selectedVertex]);
 
   const imgRect=useMemo(()=>{
@@ -253,6 +289,63 @@ export default function PlanEditor({floor,onChanged}){
       x:Math.max(keep-scaledW,Math.min(size.w-keep,next.x)),
       y:Math.max(keep-scaledH,Math.min(size.h-keep,next.y))
     };
+  }
+
+  function setStageCursor(cursor){
+    const c=stageRef.current?.container?.();
+    if(c)c.style.cursor=cursor;
+  }
+
+  function canStartTemporaryPan(e){
+    const native=e?.evt;
+    if(!native||vertexDragging.current)return false;
+    // Standard desktop UX: hold Space + left-drag, or simply drag with the middle mouse button.
+    const middle=native.button===1;
+    const spaceLeft=spaceHeld.current&&native.button===0;
+    return middle||spaceLeft;
+  }
+
+  function beginTemporaryPan(e){
+    if(!canStartTemporaryPan(e))return false;
+    e.cancelBubble=true;
+    e.evt?.preventDefault?.();
+    const pointer=stageRef.current?.getPointerPosition();
+    if(!pointer)return false;
+    panWasDragging.current=true;
+    tempPan.current={
+      active:true,
+      startPointer:{x:pointer.x,y:pointer.y},
+      startPos:{...pos}
+    };
+    setStageCursor('grabbing');
+    return true;
+  }
+
+  function moveTemporaryPan(e){
+    if(!tempPan.current.active)return;
+    e?.evt?.preventDefault?.();
+    const pointer=stageRef.current?.getPointerPosition();
+    const {startPointer,startPos}=tempPan.current;
+    if(!pointer||!startPointer||!startPos)return;
+    const next=clampPan({
+      x:startPos.x+(pointer.x-startPointer.x),
+      y:startPos.y+(pointer.y-startPointer.y)
+    });
+    // Move Konva immediately, then synchronize React state on release.
+    viewportRef.current?.position(next);
+  }
+
+  function endTemporaryPan(e){
+    if(!tempPan.current.active)return;
+    e?.evt?.preventDefault?.();
+    const node=viewportRef.current;
+    const next=node?clampPan({x:node.x(),y:node.y()}):pos;
+    if(node)node.position(next);
+    setPos(next);
+    tempPan.current={active:false,startPointer:null,startPos:null};
+    setStageCursor(spaceHeld.current?'grab':'default');
+    // Keep the subsequent click from adding a point when panning in Draw mode.
+    setTimeout(()=>{panWasDragging.current=false},0);
   }
 
   function addPoint(e){
@@ -301,50 +394,112 @@ export default function PlanEditor({floor,onChanged}){
     setScale(next);setPos(nextPos);
   }
 
-  function beginVertexDrag(i,e){
+  function beginVertexGesture(i,e){
+    const native=e?.evt;
+    if(spaceHeld.current || native?.button===1 || (native?.button!==undefined && native.button!==0))return;
     e.cancelBubble=true;
+    native?.preventDefault?.();
     setSelectedVertex(i);
+    setSelectedEdge(null);
     vertexDragging.current=true;
-    panWasDragging.current=false;
-    const viewport=viewportRef.current;
-    viewport?.stopDrag?.();
-    viewport?.draggable(false);
-    e.target.moveToTop?.();
+    editGesture.current={
+      type:'vertex',
+      index:i,
+      startDraft:draftRef.current.map(cleanPoint)
+    };
+    setStageCursor('grabbing');
   }
 
-  function dragVertex(i,e){
+  function beginEdgeGesture(i,e){
+    const native=e?.evt;
+    if(spaceHeld.current || native?.button===1 || (native?.button!==undefined && native.button!==0))return;
+    if(mode!=='edit' || draftRef.current.length<2)return;
     e.cancelBubble=true;
-    const node=e.target;
-    const {local,norm:raw}=localNodeToNorm(node);
-    node.position(local); // immediate visual response, even before React renders
+    native?.preventDefault?.();
+    const startPointer=pointerToNorm();
+    const startDraft=draftRef.current.map(cleanPoint);
+    const a=startDraft[i];
+    const b=startDraft[(i+1)%startDraft.length];
+    const orientation=Math.abs(b.x-a.x)>=Math.abs(b.y-a.y)?'h':'v';
+    editGesture.current={type:'edge',index:i,startPointer,startDraft,orientation};
+    setSelectedEdge(i);
+    setSelectedVertex(null);
+    setStageCursor(orientation==='h'?'ns-resize':'ew-resize');
+  }
 
-    const forceSnap=!!e?.evt?.shiftKey;
-    const disableSnap=!!(e?.evt?.altKey||e?.evt?.metaKey);
-    let nextPoint=raw;
+  function moveEditGesture(e){
+    const g=editGesture.current;
+    if(!g)return false;
+    e?.evt?.preventDefault?.();
+    const raw=pointerToNorm();
 
-    const current=draftRef.current;
-    if((snapEdit||forceSnap)&&!disableSnap&&current.length>1){
-      const prev=current[(i-1+current.length)%current.length];
-      const next=current[(i+1)%current.length];
-      const anchor=distance(raw,prev)<=distance(raw,next)?prev:next;
-      nextPoint=applySnap(raw,[anchor],{
-        snapOrtho:true,
-        snap45:snap45||forceSnap,
-        snapVertices:false
-      });
-      node.position(normToLocal(nextPoint));
+    if(g.type==='vertex'){
+      const i=g.index;
+      const current=draftRef.current;
+      if(!current[i])return true;
+      const forceSnap=!!e?.evt?.shiftKey;
+      const disableSnap=!!(e?.evt?.altKey||e?.evt?.metaKey);
+      let nextPoint=raw;
+
+      if((snapEdit||forceSnap)&&!disableSnap&&current.length>1){
+        const prev=current[(i-1+current.length)%current.length];
+        const next=current[(i+1)%current.length];
+        const anchor=distance(raw,prev)<=distance(raw,next)?prev:next;
+        nextPoint=applySnap(raw,[anchor],{
+          snapOrtho:true,
+          snap45:snap45||forceSnap,
+          snapVertices:false
+        });
+      }
+
+      const arr=current.map((p,idx)=>idx===i?cleanPoint(nextPoint):p);
+      draftRef.current=arr;
+      setDraft(arr);
+      return true;
     }
 
-    const arr=current.map((p,idx)=>idx===i?nextPoint:p);
-    draftRef.current=arr;
-    setDraft(arr);
+    if(g.type==='edge'){
+      const arr=g.startDraft.map(cleanPoint);
+      const i=g.index;
+      const j=(i+1)%arr.length;
+      const a0=g.startDraft[i],b0=g.startDraft[j];
+
+      if(g.orientation==='h'){
+        const base=(a0.y+b0.y)/2;
+        const delta=raw.y-g.startPointer.y;
+        const y=clamp01(base+delta);
+        arr[i]={...arr[i],y};
+        arr[j]={...arr[j],y};
+      }else{
+        const base=(a0.x+b0.x)/2;
+        const delta=raw.x-g.startPointer.x;
+        const x=clamp01(base+delta);
+        arr[i]={...arr[i],x};
+        arr[j]={...arr[j],x};
+      }
+
+      draftRef.current=arr;
+      setDraft(arr);
+      return true;
+    }
+    return false;
   }
 
-  function endVertexDrag(i,e){
-    e.cancelBubble=true;
-    dragVertex(i,e);
+  function endEditGesture(e){
+    const g=editGesture.current;
+    if(!g)return false;
+    e?.evt?.preventDefault?.();
+    moveEditGesture(e);
+    editGesture.current=null;
     vertexDragging.current=false;
-    viewportRef.current?.draggable(mode==='pan');
+    if(g.type==='edge'){
+      setNotice('Latură mutată · geometria rămâne ortogonală');
+      setStageCursor(g.orientation==='h'?'ns-resize':'ew-resize');
+    }else{
+      setNotice('Punct mutat');
+      setStageCursor('default');
+    }
+    return true;
   }
 
   function deleteVertex(index=selectedVertex){
@@ -358,6 +513,7 @@ export default function PlanEditor({floor,onChanged}){
     draftRef.current=next;
     setDraft(next);
     setSelectedVertex(null);
+    setSelectedEdge(null);
     setNotice(`Punct șters real · ${current.length} → ${next.length} puncte`);
   }
 
@@ -367,7 +523,6 @@ export default function PlanEditor({floor,onChanged}){
         <div className="segmented">
           <button className={mode==='edit'?'active':''} onClick={()=>setMode('edit')}>Editează</button>
           <button className={mode==='draw'?'active':''} onClick={()=>{setMode('draw');draftRef.current=[];setDraft([]);setSelectedVertex(null)}}>Desenează nou</button>
-          <button className={mode==='pan'?'active':''} onClick={()=>setMode('pan')}>Pan</button>
         </div>
 
         <div className="segmented snap-controls">
@@ -401,28 +556,26 @@ export default function PlanEditor({floor,onChanged}){
         </div>
 
         <div className="stage-holder" ref={holder}>
-          <Stage ref={stageRef} width={size.w} height={size.h} onWheel={onWheel} onClick={addPoint} onTap={addPoint}>
+          <Stage
+            ref={stageRef}
+            width={size.w}
+            height={size.h}
+            onWheel={onWheel}
+            onClick={addPoint}
+            onTap={addPoint}
+            onMouseDown={e=>beginTemporaryPan(e)}
+            onMouseMove={e=>{if(!moveEditGesture(e))moveTemporaryPan(e)}}
+            onMouseUp={e=>{if(!endEditGesture(e))endTemporaryPan(e)}}
+            onMouseLeave={e=>{if(editGesture.current)endEditGesture(e);else endTemporaryPan(e)}}
+            onTouchMove={e=>moveEditGesture(e)}
+            onTouchEnd={e=>endEditGesture(e)}
+            onContextMenu={e=>{if(tempPan.current.active)e.evt.preventDefault()}}
+          >
             <Layer>
               <Group
                 ref={viewportRef}
                 x={pos.x} y={pos.y} scaleX={scale} scaleY={scale}
-                draggable={mode==='pan'&&!vertexDragging.current}
-                dragBoundFunc={p=>clampPan(p)}
-                onDragStart={e=>{
-                  if(vertexDragging.current){e.target.stopDrag();return}
-                  panWasDragging.current=true;
-                }}
-                onDragMove={e=>{
-                  if(vertexDragging.current){e.target.stopDrag();return}
-                  const p=clampPan({x:e.target.x(),y:e.target.y()});
-                  if(p.x!==e.target.x()||p.y!==e.target.y())e.target.position(p);
-                }}
-                onDragEnd={e=>{
-                  if(vertexDragging.current)return;
-                  const p=clampPan({x:e.target.x(),y:e.target.y()});
-                  e.target.position(p);setPos(p);
-                  requestAnimationFrame(()=>{panWasDragging.current=false});
-                }}
+                draggable={false}
               >
                 <Rect width={size.w} height={size.h} fill="#e9edea" listening={false}/>
                 {image&&<KImage image={image} x={imgRect.x} y={imgRect.y} width={imgRect.w} height={imgRect.h} listening={false}/>} 
@@ -447,6 +600,36 @@ export default function PlanEditor({floor,onChanged}){
                     fill="rgba(19,173,88,.26)" stroke="#0e8f48" strokeWidth={2/scale}
                     listening={false}
                   />
+
+                  {mode==='edit'&&draft.length>=2&&draft.map((p,i)=>{
+                    const q=draft[(i+1)%draft.length];
+                    if(!q)return null;
+                    const horizontal=Math.abs(q.x-p.x)>=Math.abs(q.y-p.y);
+                    const active=selectedEdge===i||hoverEdge===i;
+                    return <Line
+                      key={`edge-${selectedId||'draft'}-${i}`}
+                      points={[
+                        imgRect.x+p.x*imgRect.w,imgRect.y+p.y*imgRect.h,
+                        imgRect.x+q.x*imgRect.w,imgRect.y+q.y*imgRect.h
+                      ]}
+                      stroke={active?'rgba(15,115,230,.72)':'rgba(15,115,230,.01)'}
+                      strokeWidth={(active?3:14)/scale}
+                      hitStrokeWidth={20/scale}
+                      lineCap="round"
+                      listening={true}
+                      onMouseEnter={()=>{
+                        setHoverEdge(i);
+                        if(!spaceHeld.current)setStageCursor(horizontal?'ns-resize':'ew-resize');
+                      }}
+                      onMouseLeave={()=>{
+                        setHoverEdge(v=>v===i?null:v);
+                        if(!spaceHeld.current&&!editGesture.current)setStageCursor('default');
+                      }}
+                      onMouseDown={e=>beginEdgeGesture(i,e)}
+                      onTouchStart={e=>beginEdgeGesture(i,e)}
+                    />;
+                  })}
+
                   {draft.map((p,i)=><Circle
                     key={`${selectedId||'draft'}-${i}`}
                     x={imgRect.x+p.x*imgRect.w}
@@ -455,21 +638,18 @@ export default function PlanEditor({floor,onChanged}){
                     fill={selectedVertex===i?'#ffe16a':'#fff'}
                     stroke={selectedVertex===i?'#9a6a00':'#0a1811'}
                     strokeWidth={1.7/scale}
-                    hitStrokeWidth={18/scale}
+                    hitStrokeWidth={20/scale}
                     listening={true}
-                    draggable={mode==='edit'}
-                    onMouseEnter={e=>{const c=e.target.getStage()?.container();if(c)c.style.cursor=mode==='edit'?'grab':'pointer'}}
-                    onMouseLeave={e=>{const c=e.target.getStage()?.container();if(c)c.style.cursor='default'}}
-                    onMouseDown={e=>{e.cancelBubble=true;setSelectedVertex(i)}}
-                    onTouchStart={e=>{e.cancelBubble=true;setSelectedVertex(i)}}
-                    onClick={e=>{e.cancelBubble=true;setSelectedVertex(i)}}
-                    onTap={e=>{e.cancelBubble=true;setSelectedVertex(i)}}
+                    draggable={false}
+                    onMouseEnter={()=>{if(!spaceHeld.current)setStageCursor(mode==='edit'?'move':'pointer')}}
+                    onMouseLeave={()=>{if(!spaceHeld.current&&!editGesture.current)setStageCursor('default')}}
+                    onMouseDown={e=>beginVertexGesture(i,e)}
+                    onTouchStart={e=>beginVertexGesture(i,e)}
+                    onClick={e=>{e.cancelBubble=true;setSelectedVertex(i);setSelectedEdge(null)}}
+                    onTap={e=>{e.cancelBubble=true;setSelectedVertex(i);setSelectedEdge(null)}}
                     onDblClick={e=>{e.cancelBubble=true;deleteVertex(i)}}
                     onDblTap={e=>{e.cancelBubble=true;deleteVertex(i)}}
                     onContextMenu={e=>{e.evt.preventDefault();e.cancelBubble=true;deleteVertex(i)}}
-                    onDragStart={e=>beginVertexDrag(i,e)}
-                    onDragMove={e=>dragVertex(i,e)}
-                    onDragEnd={e=>endVertexDrag(i,e)}
                   />)}
                 </>}
 
@@ -481,9 +661,9 @@ export default function PlanEditor({floor,onChanged}){
       </div>
 
       <p className="hint">
-        În <b>Editează</b>, vertex-ul este acum mutat direct din coordonata locală Konva a handle-ului, fără conversia pointerului care putea bloca vizual drag-ul.
-        Selectează un punct și folosește <b>Șterge punct</b> / Delete / Backspace / dublu click. La ștergere, punctul chiar dispare; dacă vecinii lui ar produce o diagonală,
-        editorul mută minim unul dintre vecini ca închiderea să rămână la 90° și nu recreează punctul șters.
+        În <b>Editează</b>, tragi direct de orice <b>punct</b> ca să-l muți. Poți trage și de o <b>latură</b>: laturile orizontale se mută sus/jos,
+        iar cele verticale stânga/dreapta, cu ambele capete împreună și fără să introducă diagonale pe latura mutată. Ține <b>Space</b> + drag pentru pan,
+        sau folosește butonul din mijloc / rotița. Scroll-ul face zoom. Ștergerea punctelor cu refacere ortogonală rămâne activă.
       </p>
     </div>
   );

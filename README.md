@@ -1,3 +1,33 @@
+# Estate Studio — Build 04.4.13 Point + Edge Drag
+
+Update al editorului de poligoane, peste 04.4.12.
+
+- mutarea punctelor nu mai folosește `Konva draggable`; folosește pointer gesture controlat de editor, ca să nu intre în conflict cu pan-ul temporar;
+- click + drag pe un punct îl mută efectiv;
+- laturile au hit-area proprie și pot fi trase cu totul;
+- o latură orizontală se deplasează doar sus/jos;
+- o latură verticală se deplasează doar stânga/dreapta;
+- ambele capete ale laturii sunt mutate împreună, păstrând latura H/V;
+- Space + drag și middle-mouse + drag rămân pan;
+- ștergerea de punct cu vindecare ortogonală rămâne;
+- viewerul public cu multiply rămâne neschimbat.
+
+`/api/version` => `04.4.13-edge-drag`
+
+# Estate Studio — Build 04.4.12 Temporary Pan
+
+Update exclusiv pe UX-ul editorului de poligoane.
+
+- eliminat butonul / modul separat **Pan**;
+- în **Editează**, ține **Space + click stânga + drag** pentru pan temporar;
+- alternativ, **butonul din mijloc / rotița + drag** face pan direct, fără tastă;
+- după release revii automat la editarea punctelor;
+- pan-ul mută viewport-ul imediat în Konva și sincronizează poziția la final;
+- drag-ul vertex-urilor, ștergerea punctelor și închiderea ortogonală rămân din 04.4.11;
+- scroll-ul continuă să facă zoom.
+
+`/api/version` => `04.4.12-temp-pan`
+
 # Estate Studio — Build 04.4.11 Editor Real Interactions
 
 Fix concentrat exclusiv pe problema raportată în 04.4.10: mesajele de UI apăreau, dar geometria nu se modifica vizibil.
