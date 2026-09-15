@@ -1,3 +1,18 @@
+# Estate Studio — Build 04.4.14 Undo + Insert Vertex
+
+Update peste 04.4.13, fără să schimb logica de drag/pan care funcționează.
+
+## Nou
+- **Undo general** pentru move point, move edge, delete point, add point și desenare;
+- shortcut **Ctrl+Z / Cmd+Z**;
+- istoric de până la 60 de pași;
+- **dublu-click pe o latură** adaugă un punct exact în locul ales, proiectat matematic pe segment;
+- buton **Adaugă punct pe latură** pentru latura selectată (inserează la mijloc);
+- inserarea unui punct nu schimbă forma poligonului până nu muți noul vertex;
+- delete + healing ortogonal, point drag, edge drag și pan temporar rămân din 04.4.13.
+
+`/api/version` => `04.4.14-undo-insert-vertex`
+
 # Estate Studio — Build 04.4.13 Point + Edge Drag
 
 Update al editorului de poligoane, peste 04.4.12.

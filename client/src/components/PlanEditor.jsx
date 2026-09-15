@@ -148,6 +148,23 @@ function deleteVertexAndHeal(points,index){
   return candidates[0].points;
 }
 
+function sameDraft(a,b,eps=1e-7){
+  if(!Array.isArray(a)||!Array.isArray(b)||a.length!==b.length)return false;
+  for(let i=0;i<a.length;i++){
+    if(Math.abs(a[i].x-b[i].x)>eps||Math.abs(a[i].y-b[i].y)>eps)return false;
+  }
+  return true;
+}
+
+function projectedPointOnSegment(raw,a,b){
+  const ax=a.x,ay=a.y,bx=b.x,by=b.y;
+  const dx=bx-ax,dy=by-ay;
+  const len2=dx*dx+dy*dy;
+  if(len2<1e-12)return cleanPoint(a);
+  const t=clamp(((raw.x-ax)*dx+(raw.y-ay)*dy)/len2,0,1);
+  return cleanPoint({x:ax+t*dx,y:ay+t*dy});
+}
+
 export default function PlanEditor({floor,onChanged}){
   const holder=useRef();
   const stageRef=useRef();
@@ -158,6 +175,7 @@ export default function PlanEditor({floor,onChanged}){
   const draftRef=useRef([]);
   const spaceHeld=useRef(false);
   const tempPan=useRef({active:false,startPointer:null,startPos:null});
+  const undoRef=useRef([]);
   const image=useHtmlImage(floor?.plan_path);
 
   const [size,setSize]=useState({w:900,h:600});
@@ -175,6 +193,7 @@ export default function PlanEditor({floor,onChanged}){
   const [selectedVertex,setSelectedVertex]=useState(null);
   const [selectedEdge,setSelectedEdge]=useState(null);
   const [hoverEdge,setHoverEdge]=useState(null);
+  const [undoCount,setUndoCount]=useState(0);
 
   const selected=(floor?.apartments||[]).find(a=>a.id===selectedId);
 
@@ -203,6 +222,8 @@ export default function PlanEditor({floor,onChanged}){
     setSelectedVertex(null);
     setSelectedEdge(null);
     setHoverEdge(null);
+    undoRef.current=[];
+    setUndoCount(0);
     setNotice('');
   },[selectedId,selected?.apartment_polygons]);
 
@@ -220,6 +241,11 @@ export default function PlanEditor({floor,onChanged}){
           spaceHeld.current=true;
           if(!tempPan.current.active)setStageCursor('grab');
         }
+        return;
+      }
+      if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&e.key.toLowerCase()==='z'){
+        e.preventDefault();
+        undoLastEdit();
         return;
       }
       if((e.key==='Delete'||e.key==='Backspace')&&selectedVertex!==null){
@@ -348,6 +374,67 @@ export default function PlanEditor({floor,onChanged}){
     setTimeout(()=>{panWasDragging.current=false},0);
   }
 
+  function recordUndo(snapshot){
+    const snap=(snapshot||draftRef.current).map(cleanPoint);
+    const current=draftRef.current.map(cleanPoint);
+    if(sameDraft(snap,current))return;
+    const stack=undoRef.current;
+    const last=stack[stack.length-1];
+    if(!last||!sameDraft(last,snap)){
+      stack.push(snap);
+      if(stack.length>60)stack.shift();
+      undoRef.current=stack;
+      setUndoCount(stack.length);
+    }
+  }
+
+  function undoLastEdit(){
+    const stack=undoRef.current;
+    if(!stack.length){
+      setNotice('Nu mai există modificări de anulat.');
+      return;
+    }
+    const prev=stack.pop().map(cleanPoint);
+    undoRef.current=stack;
+    draftRef.current=prev;
+    setDraft(prev);
+    setSelectedVertex(null);
+    setSelectedEdge(null);
+    setHoverEdge(null);
+    setUndoCount(stack.length);
+    setNotice('Undo · ultima modificare a fost anulată');
+  }
+
+  function insertVertexOnEdge(index,e=null,atMidpoint=false){
+    const current=draftRef.current;
+    if(current.length<2||index===null||index===undefined)return;
+    const a=current[index];
+    const b=current[(index+1)%current.length];
+    const raw=atMidpoint
+      ? cleanPoint({x:(a.x+b.x)/2,y:(a.y+b.y)/2})
+      : pointerToNorm();
+    const point=projectedPointOnSegment(raw,a,b);
+
+    // Avoid creating a duplicate on top of an existing endpoint.
+    if(distance(point,a)<=EPS*2||distance(point,b)<=EPS*2){
+      setNotice('Alege un loc puțin mai departe de colț.');
+      return;
+    }
+
+    recordUndo(current);
+    const next=current.map(cleanPoint);
+    next.splice(index+1,0,point);
+    draftRef.current=next;
+    setDraft(next);
+    setSelectedVertex(index+1);
+    setSelectedEdge(null);
+    setNotice('Punct adăugat pe latură');
+    if(e){
+      e.cancelBubble=true;
+      e.evt?.preventDefault?.();
+    }
+  }
+
   function addPoint(e){
     if(mode!=='draw'||panWasDragging.current)return;
     if(e.target?.getClassName?.()==='Circle')return;
@@ -359,6 +446,7 @@ export default function PlanEditor({floor,onChanged}){
       snap45:snap45||force45,
       snapVertices
     });
+    recordUndo(draftRef.current);
     setDraft(v=>{
       const next=[...v,snapped];
       draftRef.current=next;
@@ -490,6 +578,9 @@ export default function PlanEditor({floor,onChanged}){
     if(!g)return false;
     e?.evt?.preventDefault?.();
     moveEditGesture(e);
+    if(g.startDraft&&!sameDraft(g.startDraft,draftRef.current)){
+      recordUndo(g.startDraft);
+    }
     editGesture.current=null;
     vertexDragging.current=false;
     if(g.type==='edge'){
@@ -510,6 +601,11 @@ export default function PlanEditor({floor,onChanged}){
       return;
     }
     const next=deleteVertexAndHeal(current,index);
+    if(sameDraft(current,next)){
+      setNotice('Punctul nu a putut fi eliminat fără să strice poligonul.');
+      return;
+    }
+    recordUndo(current);
     draftRef.current=next;
     setDraft(next);
     setSelectedVertex(null);
@@ -522,7 +618,10 @@ export default function PlanEditor({floor,onChanged}){
       <div className="polygon-toolbar">
         <div className="segmented">
           <button className={mode==='edit'?'active':''} onClick={()=>setMode('edit')}>Editează</button>
-          <button className={mode==='draw'?'active':''} onClick={()=>{setMode('draw');draftRef.current=[];setDraft([]);setSelectedVertex(null)}}>Desenează nou</button>
+          <button className={mode==='draw'?'active':''} onClick={()=>{
+            if(draftRef.current.length)recordUndo(draftRef.current);
+            setMode('draw');draftRef.current=[];setDraft([]);setSelectedVertex(null);setSelectedEdge(null);
+          }}>Desenează nou</button>
         </div>
 
         <div className="segmented snap-controls">
@@ -532,10 +631,9 @@ export default function PlanEditor({floor,onChanged}){
           <button className={snapEdit?'active':''} onClick={()=>setSnapEdit(v=>!v)}>Snap edit</button>
         </div>
 
-        <button onClick={()=>setDraft(v=>{
-          const next=v.slice(0,-1);draftRef.current=next;setSelectedVertex(null);return next;
-        })}>Undo punct</button>
+        <button disabled={!undoCount} onClick={undoLastEdit}>Undo</button>
         <button disabled={selectedVertex===null||draft.length<=3} onClick={()=>deleteVertex(selectedVertex)}>Șterge punct</button>
+        <button disabled={selectedEdge===null} onClick={()=>insertVertexOnEdge(selectedEdge,null,true)}>Adaugă punct pe latură</button>
         <button onClick={()=>{setScale(1);setPos({x:0,y:0})}}>Încadrează planul</button>
         <button className="primary" disabled={busy||!selected} onClick={savePolygon}>{busy?'Salvez…':'Salvează poligon'}</button>
         {notice&&<span className="save-notice">✓ {notice}</span>}
@@ -627,6 +725,10 @@ export default function PlanEditor({floor,onChanged}){
                       }}
                       onMouseDown={e=>beginEdgeGesture(i,e)}
                       onTouchStart={e=>beginEdgeGesture(i,e)}
+                      onClick={e=>{e.cancelBubble=true;setSelectedEdge(i);setSelectedVertex(null)}}
+                      onTap={e=>{e.cancelBubble=true;setSelectedEdge(i);setSelectedVertex(null)}}
+                      onDblClick={e=>insertVertexOnEdge(i,e,false)}
+                      onDblTap={e=>insertVertexOnEdge(i,e,false)}
                     />;
                   })}
 
@@ -661,9 +763,10 @@ export default function PlanEditor({floor,onChanged}){
       </div>
 
       <p className="hint">
-        În <b>Editează</b>, tragi direct de orice <b>punct</b> ca să-l muți. Poți trage și de o <b>latură</b>: laturile orizontale se mută sus/jos,
-        iar cele verticale stânga/dreapta, cu ambele capete împreună și fără să introducă diagonale pe latura mutată. Ține <b>Space</b> + drag pentru pan,
-        sau folosește butonul din mijloc / rotița. Scroll-ul face zoom. Ștergerea punctelor cu refacere ortogonală rămâne activă.
+        În <b>Editează</b>, tragi direct de orice <b>punct</b> sau de o <b>latură</b>. <b>Undo</b> anulează pe rând mutări, ștergeri,
+        puncte adăugate și desenări; merge și cu <b>Ctrl/Cmd + Z</b>. Pentru un punct nou exact pe o dreaptă, dă <b>dublu-click pe latură</b>
+        în locul dorit; alternativ selectează latura și folosește <b>Adaugă punct pe latură</b> pentru mijloc. Ține <b>Space</b> + drag pentru pan
+        sau folosește butonul din mijloc / rotița. Scroll-ul face zoom.
       </p>
     </div>
   );
