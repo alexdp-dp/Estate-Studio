@@ -1,3 +1,27 @@
+# Estate Studio — Build 04.2.2 Source Newline Fix
+
+Hotfix pentru eroarea Vite/PostCSS:
+
+`Unknown word \n`
+
+## Cauza exactă
+În buildul 04.2.0 am scris accidental secțiuni noi în două fișiere cu `\n`
+literal în sursă, în loc de newline real:
+
+- `client/src/styles.css`
+- `client/src/cadTopology.js`
+
+PostCSS s-a oprit primul în `styles.css`, dar după repararea CSS-ului ar fi
+urmat și o eroare de sintaxă în `cadTopology.js`.
+
+## Fix
+- toate newline-urile literale din cele două blocuri au fost transformate în
+  newline-uri reale;
+- fixul de dependency `three ^0.172.0` din 04.2.1 rămâne inclus;
+- logica CAD/viewer/mapare din 04.2.0 rămâne neschimbată.
+
+`/api/version` => `04.2.2-source-newline-fix`
+
 # Estate Studio — Build 04.2.1 Three Peer Dependency Fix
 
 Hotfix pentru eroarea de build Render:

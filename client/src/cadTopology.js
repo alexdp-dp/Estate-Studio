@@ -338,7 +338,32 @@ export function mapApartmentsFromCad(segments,texts=[],aspect=1,doorHints=[]){
     }
   }
 
-  // Door swing arcs are much stronger evidence than a generic gap. Sample the room\n  // labels around each ARC and explicitly connect the two rooms separated by that door.\n  let doorHintEdges=0;\n  for(const hint of doorHints||[]){\n    const cx=Math.round(clamp(hint.x)*(w-1));\n    const cy=Math.round(clamp(hint.y)*(h-1));\n    const rx=Math.max(6,Math.round(Math.abs(hint.rx||.012)*w));\n    const ry=Math.max(6,Math.round(Math.abs(hint.ry||.012)*h));\n    const ids=new Set();\n    for(let a=0;a<Math.PI*2;a+=Math.PI/12){\n      for(const mul of [.55,.85,1.15]){\n        const x=Math.round(cx+Math.cos(a)*rx*mul);\n        const y=Math.round(cy+Math.sin(a)*ry*mul);\n        if(x<0||y<0||x>=w||y>=h)continue;\n        const id=cc.labels[at(x,y,w)];\n        if(roomSet.has(id))ids.add(id);\n      }\n    }\n    const arr=[...ids];\n    if(arr.length===2){\n      addEdge(arr[0],arr[1],{orientation:'arc',axis:0,from:0,to:0,size:0});\n      doorHintEdges++;\n    }\n  }\n\n  const graphEdges=[...edges.values()].filter(e=>e.count>=1);
+  // Door swing arcs are much stronger evidence than a generic gap. Sample the room
+  // labels around each ARC and explicitly connect the two rooms separated by that door.
+  let doorHintEdges=0;
+  for(const hint of doorHints||[]){
+    const cx=Math.round(clamp(hint.x)*(w-1));
+    const cy=Math.round(clamp(hint.y)*(h-1));
+    const rx=Math.max(6,Math.round(Math.abs(hint.rx||.012)*w));
+    const ry=Math.max(6,Math.round(Math.abs(hint.ry||.012)*h));
+    const ids=new Set();
+    for(let a=0;a<Math.PI*2;a+=Math.PI/12){
+      for(const mul of [.55,.85,1.15]){
+        const x=Math.round(cx+Math.cos(a)*rx*mul);
+        const y=Math.round(cy+Math.sin(a)*ry*mul);
+        if(x<0||y<0||x>=w||y>=h)continue;
+        const id=cc.labels[at(x,y,w)];
+        if(roomSet.has(id))ids.add(id);
+      }
+    }
+    const arr=[...ids];
+    if(arr.length===2){
+      addEdge(arr[0],arr[1],{orientation:'arc',axis:0,from:0,to:0,size:0});
+      doorHintEdges++;
+    }
+  }
+
+  const graphEdges=[...edges.values()].filter(e=>e.count>=1);
   const degree=new Map(rooms.map(r=>[r.id,0]));
   for(const e of graphEdges){
     degree.set(e.a,(degree.get(e.a)||0)+1);
@@ -374,7 +399,28 @@ export function mapApartmentsFromCad(segments,texts=[],aspect=1,doorHints=[]){
     if(ranked[0]?.deg>=3)commonIds=[ranked[0].id];
   }
 
-  // Common hall/lobby may be split by lift/stair cores. Expand from the best common\n  // cell into directly connected high-degree elongated neighbours.\n  if(commonIds.length){\n    const baseCommon=new Set(commonIds);\n    let changed=true,guard=0;\n    while(changed&&guard++<4){\n      changed=false;\n      for(const e of graphEdges){\n        const aIn=baseCommon.has(e.a),bIn=baseCommon.has(e.b);\n        if(aIn===bIn)continue;\n        const other=aIn?e.b:e.a;\n        const r=roomById.get(other);\n        if(!r)continue;\n        const deg=degree.get(other)||0;\n        const aspectR=Math.max(r.width,r.height)/Math.max(1,Math.min(r.width,r.height));\n        if(deg>=3 || (deg>=2&&aspectR>=2.1)){baseCommon.add(other);commonIds.push(other);changed=true}\n      }\n    }\n    commonIds=[...new Set(commonIds)];\n  }\n\n  const common=new Set(commonIds);
+  // Common hall/lobby may be split by lift/stair cores. Expand from the best common
+  // cell into directly connected high-degree elongated neighbours.
+  if(commonIds.length){
+    const baseCommon=new Set(commonIds);
+    let changed=true,guard=0;
+    while(changed&&guard++<4){
+      changed=false;
+      for(const e of graphEdges){
+        const aIn=baseCommon.has(e.a),bIn=baseCommon.has(e.b);
+        if(aIn===bIn)continue;
+        const other=aIn?e.b:e.a;
+        const r=roomById.get(other);
+        if(!r)continue;
+        const deg=degree.get(other)||0;
+        const aspectR=Math.max(r.width,r.height)/Math.max(1,Math.min(r.width,r.height));
+        if(deg>=3 || (deg>=2&&aspectR>=2.1)){baseCommon.add(other);commonIds.push(other);changed=true}
+      }
+    }
+    commonIds=[...new Set(commonIds)];
+  }
+
+  const common=new Set(commonIds);
   const nodes=rooms.filter(r=>!common.has(r.id));
   const nodeSet=new Set(nodes.map(r=>r.id));
   const graph=new Map(nodes.map(r=>[r.id,[]]));
