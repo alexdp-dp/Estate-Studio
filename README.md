@@ -1,3 +1,50 @@
+# Estate Studio — Build 04.4.1 Balcony + Orthogonal + Tangent
+
+Update peste 04.4.0, concentrat strict pe cele trei probleme observate în planul real.
+
+## 1. Balcoane / terase
+În 04.4.0 exteriorul concura cu apartamentele și putea intra prin golurile fine ale
+balustradelor/fațadei, câștigând balconul.
+
+În 04.4.1:
+- construim separat un `enclosure mask`;
+- închidem doar pentru analiza exteriorului golurile fine din fațadă/balustradă;
+- detectăm buzunarele care erau marcate `exterior`, dar devin spații închise;
+- dacă un astfel de buzunar are un singur apartament vecin dominant și nu aparține
+  holului comun, este atașat acelui apartament;
+- ușile rămân deschise în segmentarea principală.
+
+## 2. Doar linii la 90°
+Pentru Topology Guided nu mai folosim `architecturalPolygonize` / RDP / angle snapping.
+
+Poligonul final este extras direct dintr-o grilă de etichete comună:
+- toate segmentele sunt strict orizontale sau verticale;
+- nu există muchii diagonale;
+- nu mai urmărește arcul ușii;
+- eliminăm punctele coliniare;
+- eliminăm excursiile/spike-urile dreptunghiulare foarte scurte.
+
+## 3. Apartamente tangențiale, fără overlap
+Toate apartamentele sunt generate din aceeași partiție raster și din aceeași grilă
+regularizată.
+
+Asta înseamnă:
+- un perete comun are o singură poziție geometrică;
+- poligonul A și poligonul B folosesc exact aceeași limită comună;
+- nu mai simplificăm fiecare apartament independent;
+- nu ar trebui să apară suprapuneri sau fante între vecini.
+
+## Regularizare
+Înainte de vectorizare:
+- etichetele sunt agregate pe o grilă comună;
+- se face majority smoothing conservator;
+- apoi se extrage conturul ortogonal.
+
+## UI
+Rezumatul detectorului arată și câte balcoane/terase au fost recuperate automat.
+
+`/api/version` => `04.4.1-balcony-orthogonal-tangent`
+
 # Estate Studio — Build 04.4.0 PNG Topology Guided
 
 Detector PNG optimizat pentru planurile tehnice curate, alb-negru, cu pereți groși,
