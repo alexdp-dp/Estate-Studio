@@ -3,7 +3,7 @@ import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'reac
 import {api,slugify,statusLabel} from '../api';
 const ThreeViewer=lazy(()=>import('./ThreeViewer'));
 const PlanEditor=lazy(()=>import('./PlanEditor'));
-const CadPlanImporter=lazy(()=>import('./CadPlanImporter'));
+const AutoApartmentDetector=lazy(()=>import('./AutoApartmentDetector'));
 const SharedModelMapper=lazy(()=>import('./SharedModelMapper'));
 
 const STEPS=[['general','General'],['buildings','Blocuri'],['model','Model 3D'],['calibration','Calibrare'],['floors','Etaje'],['plans','Planuri & apartamente'],['preview','Preview'],['embed','Embed']];
@@ -13,7 +13,7 @@ function Projects(){const [items,setItems]=useState([]),[show,setShow]=useState(
 function ProjectShell({project,reload,children}){const {section}=useParams();const idx=Math.max(0,STEPS.findIndex(([k])=>k===section));const complete={general:!!project.name,buildings:(project.buildings||[]).length>0,model:!!project.settings?.shared_model?.url||(project.buildings||[]).some(b=>b.model_path),calibration:project.settings?.model_mode==='shared'?!!project.settings?.shared_model?.display_height_units:(project.buildings||[]).some(b=>b.model_path&&b.real_height_m&&b.display_height_units),floors:(project.buildings||[]).some(b=>(b.floors||[]).length>0),plans:(project.buildings||[]).some(b=>(b.floors||[]).some(f=>f.plan_path&&(f.apartments||[]).length>0)),preview:false,embed:project.is_published};return <Shell><header className="project-top"><div><Link to="/admin/projects">← Proiecte</Link><small>{project.is_published?'PUBLICAT':'DRAFT'}</small><h1>{project.name}</h1><span>/{project.slug}</span></div><div className="project-top-actions"><a href={`/embed/${project.slug}?preview=1`} target="_blank" rel="noreferrer">Deschide viewer ↗</a><button className={project.is_published?'success':'primary'} onClick={async()=>{await api(`/admin/projects/${project.id}`,{method:'PATCH',body:{is_published:!project.is_published}});reload()}}>{project.is_published?'✓ Publicat':'Publică proiectul'}</button></div></header><div className="project-layout"><aside className="project-nav">{STEPS.map(([key,label],i)=><Link key={key} className={section===key?'active':''} to={`/admin/projects/${project.id}/${key}`}><span>{complete[key]?'✓':String(i+1).padStart(2,'0')}</span>{label}</Link>)}</aside><main className="project-content">{children}<div className="step-footer">{idx>0?<Link className="button-link" to={`/admin/projects/${project.id}/${STEPS[idx-1][0]}`}>← {STEPS[idx-1][1]}</Link>:<span/>}{idx<STEPS.length-1&&<Link className="primary" to={`/admin/projects/${project.id}/${STEPS[idx+1][0]}`}>{STEPS[idx+1][1]} →</Link>}</div></main></div></Shell>}
 function SectionHead({kicker,title,desc,actions}){return <div className="section-head"><div><small>{kicker}</small><h2>{title}</h2><p>{desc}</p></div>{actions&&<div>{actions}</div>}</div>}
 function General({p,reload}){const [form,setForm]=useState({name:p.name,slug:p.slug,description:p.description||'',embed_height:p.embed_height||760,source_mode:p.source_mode||'glb'});const save=async()=>{await api(`/admin/projects/${p.id}`,{method:'PATCH',body:form});reload()};async function uploadBrand(file,key){const fd=new FormData();fd.append('file',file);fd.append('project_id',p.id);fd.append('asset_type',key==='logo_url'?'project-logo':'project-hero');const u=await api('/admin/upload/project-images',{method:'POST',body:fd});await api(`/admin/projects/${p.id}`,{method:'PATCH',body:{settings:{...(p.settings||{}),[key]:u.url}}});reload()}return <><SectionHead kicker="01 · GENERAL" title="Identitatea proiectului" desc="Datele de bază și modul în care va fi folosit proiectul."/><div className="panel form-grid"><label>Nume proiect<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Slug public<input value={form.slug} onChange={e=>setForm({...form,slug:slugify(e.target.value)})}/></label><label className="wide">Descriere<textarea rows="4" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Înălțime iframe implicită<input type="number" value={form.embed_height} onChange={e=>setForm({...form,embed_height:+e.target.value})}/></label><label>Sursă model<select value={form.source_mode} onChange={e=>setForm({...form,source_mode:e.target.value})}><option value="glb">GLB / GLTF existent</option><option value="documents">Documentație arhitecturală</option></select></label><div className="wide end"><button className="primary" onClick={save}>Salvează</button></div></div><div className="panel brand-assets"><div><h3>Logo proiect</h3>{p.settings?.logo_url?<img className="asset-preview logo" src={p.settings.logo_url}/>:<div className="asset-placeholder">LOGO</div>}<label className="button-file"><input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadBrand(e.target.files[0],'logo_url')}/>Încarcă logo</label></div><div><h3>Imagine proiect</h3>{p.settings?.hero_url?<img className="asset-preview" src={p.settings.hero_url}/>:<div className="asset-placeholder">HERO</div>}<label className="button-file"><input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadBrand(e.target.files[0],'hero_url')}/>Încarcă imagine</label></div></div>{form.source_mode==='documents'&&<Documents p={p} reload={reload}/>}</>}
-function Documents({p,reload}){const [busy,setBusy]=useState(false);async function up(file){setBusy(true);try{const fd=new FormData();fd.append('file',file);fd.append('project_id',p.id);fd.append('asset_type','architectural-document');await api('/admin/upload/project-documents',{method:'POST',body:fd});reload()}finally{setBusy(false)}}return <div className="panel"><h3>Documentație arhitecturală</h3><p className="hint">Încarcă plan general, planuri de nivel, fațade, secțiuni și cote. Fișierele sunt păstrate pe proiect pentru fluxul de modelare.</p><label className="upload-zone"><input type="file" multiple accept=".pdf,image/*,.dwg,.dxf" onChange={e=>[...e.target.files].forEach(up)}/><b>{busy?'Se încarcă…':'＋ Încarcă documentație'}</b><span>PDF, imagini, DWG/DXF · max 50 MB / fișier</span></label><div className="asset-list">{(p.assets||[]).filter(a=>a.asset_type==='architectural-document').map(a=><div key={a.id}><b>{a.file_name||a.label||'Document'}</b><span>{a.mime_type||''}</span></div>)}</div><div className="notice warning">Generarea automată a unui model comercial detaliat din planuri necesită un motor de modelare/AI conectat serverului. Estate Studio păstrează documentația și workflow-ul pregătit, fără să inventeze geometrie lipsă.</div></div>}
+function Documents({p,reload}){const [busy,setBusy]=useState(false);async function up(file){setBusy(true);try{const fd=new FormData();fd.append('file',file);fd.append('project_id',p.id);fd.append('asset_type','architectural-document');await api('/admin/upload/project-documents',{method:'POST',body:fd});reload()}finally{setBusy(false)}}return <div className="panel"><h3>Documentație arhitecturală</h3><p className="hint">Încarcă plan general, planuri de nivel, fațade, secțiuni și cote. Fișierele sunt păstrate pe proiect pentru fluxul de modelare.</p><label className="upload-zone"><input type="file" multiple accept=".pdf,image/*" onChange={e=>[...e.target.files].forEach(up)}/><b>{busy?'Se încarcă…':'＋ Încarcă documentație'}</b><span>PDF și imagini · max 50 MB / fișier</span></label><div className="asset-list">{(p.assets||[]).filter(a=>a.asset_type==='architectural-document').map(a=><div key={a.id}><b>{a.file_name||a.label||'Document'}</b><span>{a.mime_type||''}</span></div>)}</div></div>}
 function Buildings({p,reload}){
   const [name,setName]=useState('');
   const shared=p.settings?.model_mode==='shared';
@@ -123,7 +123,7 @@ function Plans({p,reload}){
   const [bid,setBid]=useState(p.buildings?.[0]?.id);
   const b=p.buildings.find(x=>x.id===bid)||p.buildings[0];
   const [fid,setFid]=useState(b?.floors?.[0]?.id);
-  const [edit,setEdit]=useState(null),[newOpen,setNewOpen]=useState(false),[cadOpen,setCadOpen]=useState(false);
+  const [edit,setEdit]=useState(null),[newOpen,setNewOpen]=useState(false),[autoOpen,setAutoOpen]=useState(false);
 
   useEffect(()=>{
     if(!b?.floors?.find(x=>x.id===fid))setFid(b?.floors?.[0]?.id)
@@ -148,7 +148,7 @@ function Plans({p,reload}){
     <SectionHead
       kicker="05 · PLANURI & APARTAMENTE"
       title="Plan interactiv"
-      desc="Importă planul DWG, vezi-l ca SVG vectorial și trasează poligoanele cu snap direct pe geometria CAD."
+      desc="Încarcă planul, detectează automat apartamentele sau trasează manual poligoanele."
       actions={<div className="inline-selects">
         <select value={b.id} onChange={e=>setBid(e.target.value)}>{p.buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
         <select value={f?.id||''} onChange={e=>setFid(e.target.value)}>{(b.floors||[]).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
@@ -157,17 +157,13 @@ function Plans({p,reload}){
 
     {!f?<div className="empty-state"><b>Nu există etaje.</b><span>Generează etajele înainte de a adăuga planuri.</span></div>:<>
       <div className="panel plan-head">
-        <div>
-          <h3>{f.name}</h3>
-          <p>{f.height_from_m}–{f.height_to_m} m · {(f.apartments||[]).length} apartamente</p>
-          {f.settings?.cad?.source_file&&<span className="cad-source-badge">CAD · {f.settings.cad.source_file} · {f.settings.cad.segment_count||0} segmente</span>}
-        </div>
+        <div><h3>{f.name}</h3><p>{f.height_from_m}–{f.height_to_m} m · {(f.apartments||[]).length} apartamente</p></div>
         <div>
           <label className="button-file">
             <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadPlan(e.target.files[0])}/>
-            {f.plan_path?'Imagine fallback':'Încarcă imagine fallback'}
+            {f.plan_path?'Înlocuiește planul':'Încarcă planul'}
           </label>
-          <button className="cad-import-btn" onClick={()=>setCadOpen(true)}>⌁ Importă DWG</button>
+          {f.plan_path&&<button className="auto-detect-btn" onClick={()=>setAutoOpen(true)}>✦ Detectează apartamente</button>}
           <button className="primary" onClick={()=>setNewOpen(true)}>＋ Apartament</button>
         </div>
       </div>
@@ -190,7 +186,7 @@ function Plans({p,reload}){
 
       <PlanEditor floor={f} onChanged={reload}/>
 
-      {cadOpen&&<CadPlanImporter project={p} building={b} floor={f} onClose={()=>setCadOpen(false)} onImported={reload}/>}
+      {autoOpen&&<AutoApartmentDetector floor={f} onClose={()=>setAutoOpen(false)} onCommitted={reload}/>}
       {(newOpen||edit)&&<ApartmentForm project={p} floor={f} apartment={edit} onSaved={()=>{setEdit(null);setNewOpen(false);reload()}} onCancel={()=>{setEdit(null);setNewOpen(false)}}/>}
     </>}
   </>

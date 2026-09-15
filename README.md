@@ -1,275 +1,34 @@
-# Estate Studio — Build 04.2.3 CAD Display First
+# Estate Studio — Build 04.3.0 PNG Workflow Restored
 
-Build concentrat strict pe afișarea corectă a planului CAD înainte de mapare.
+Rollback complet al experimentelor DWG/CAD.
 
-## Fixuri de viewer
-- fundalul CAD este acum ÎNTUNECAT implicit;
-- am eliminat forțarea fundalului alb care putea face entitățile CAD de culoare 7 (alb) complet invizibile;
-- există buton `Fundal alb / Fundal închis`;
-- copiem și configurăm explicit:
-  - `mtext-renderer-worker.js`
-  - `dxf-parser-worker.js`
-- verificăm worker-ele înainte de `openDocument`;
-- așteptăm terminarea progressive rendering înainte de framing;
-- `zoomToFitDrawing` rulează după procesarea entităților;
-- butonul `Încadrează desenul` repetă framingul pentru desene mari;
-- raportăm numărul de entități și datele lipsă.
+## Bază
+Acest build pornește din `03.8.4-detector-runtime-rollback`, ultima ramură stabilă înainte de introducerea workflow-ului DWG.
 
-## XREF diagnostic
-Viewerul expune `missedData.xrefs`.
-Dacă DWG-ul principal conține doar mobilier/uși iar pereții sunt într-un XREF extern,
-Estate Studio afișează acum clar `X XREF-uri lipsă`.
-În acest caz fișierul DWG singur chiar nu conține geometria pereților și trebuie importat
-și XREF-ul sau primit un DWG cu referințele bind-uite.
+## Ce rămâne
+- upload plan etaj ca PNG/JPG/WebP/SVG;
+- editor manual de poligoane;
+- mutare liberă a vertex-urilor;
+- pan/zoom stabil;
+- snap 0/90, 45°, vertices și `Snap edit`;
+- detectorul `Architectural V2` pentru imagini, fără OCR/Tesseract;
+- viewerul public și camera din ramura stabilă;
+- selecția `ansamblu → bloc → etaj → apartament`;
+- tooltip-uri și shade pentru blocurile inactive;
+- shared GLB și toate fixurile cumulative de dinainte de DWG.
 
-## Mapare
-Logica de mapare din 04.2.2 este păstrată, dar nu am modificat-o în acest build.
-Scopul 04.2.3 este să vedem întâi desenul complet și corect.
+## Ce este eliminat
+- import DWG;
+- conversie DWG → SVG/DXF;
+- viewer CAD;
+- `CadPlanImporter`;
+- libredwg;
+- cad-simple-viewer;
+- orice buton sau workflow CAD în editorul de etaj.
 
-`/api/version` => `04.2.3-cad-display-first`
+Documentația arhitecturală din admin acceptă acum doar PDF și imagini.
 
-# Estate Studio — Build 04.2.2 Source Newline Fix
-
-Hotfix pentru eroarea Vite/PostCSS:
-
-`Unknown word \n`
-
-## Cauza exactă
-În buildul 04.2.0 am scris accidental secțiuni noi în două fișiere cu `\n`
-literal în sursă, în loc de newline real:
-
-- `client/src/styles.css`
-- `client/src/cadTopology.js`
-
-PostCSS s-a oprit primul în `styles.css`, dar după repararea CSS-ului ar fi
-urmat și o eroare de sintaxă în `cadTopology.js`.
-
-## Fix
-- toate newline-urile literale din cele două blocuri au fost transformate în
-  newline-uri reale;
-- fixul de dependency `three ^0.172.0` din 04.2.1 rămâne inclus;
-- logica CAD/viewer/mapare din 04.2.0 rămâne neschimbată.
-
-`/api/version` => `04.2.2-source-newline-fix`
-
-# Estate Studio — Build 04.2.1 Three Peer Dependency Fix
-
-Hotfix pentru eroarea de build Render:
-
-`peer three@"^0.172.0" from @mlightcad/mtext-renderer@0.12.8`
-
-## Cauza exactă
-Buildul 04.2.0 avea:
-- `three`: `^0.169.0`
-- `@mlightcad/cad-simple-viewer`: `^1.7.0`
-
-`cad-simple-viewer` trage `@mlightcad/mtext-renderer@0.12.8`, iar acesta cere `three ^0.172.0`.
-
-## Fix
-- `three` actualizat la `^0.172.0`;
-- override explicit pentru `three ^0.172.0`;
-- NU folosim `--force`;
-- NU folosim `--legacy-peer-deps`;
-- restul buildului 04.2.0 rămâne neschimbat.
-
-`/api/version` => `04.2.1-three-peer-dependency-fix`
-
-# Estate Studio — Build 04.2.0 Real CAD Viewer + Door Graph
-
-Două corecții majore față de 04.1.0.
-
-## 1. DWG-ul se vede printr-un viewer CAD real
-- DWG → DXF cu LibreDWG;
-- DXF-ul este deschis în `@mlightcad/cad-simple-viewer`;
-- nu mai folosim SVG-ul incomplet LibreDWG drept ecran principal;
-- suport mult mai bun pentru planuri mari, blocuri, linework și layout;
-- zoom/pan real;
-- selecția etajului se face direct peste viewer, în coordonate CAD world.
-
-## 2. Maparea nu mai tratează fiecare cameră drept apartament
-- DXF-ul este citit direct pentru LINE / LWPOLYLINE / ARC / INSERT / TEXT / MTEXT;
-- blocurile INSERT sunt expandate recursiv;
-- arcele de ușă sunt extrase explicit ca `doorHints`;
-- fiecare arc de ușă care separă două camere creează o muchie în graful de conectivitate;
-- pragul de gap pentru uși este mai permisiv;
-- conexiunile nu mai cer dovadă duplicată (`count >= 1`);
-- holul comun poate fi extins peste mai multe celule despărțite de lift/scară;
-- după eliminarea holului comun, camerele conectate prin uși sunt grupate ca UN SINGUR apartament;
-- balconul rămâne în același grup când există ușă către apartament.
-
-## Preview salvat
-Planul etajului este reconstruit ca SVG din geometria DXF selectată, nu din vechiul `dwg_to_svg`.
-
-`/api/version` => `04.2.0-real-cad-door-graph`
-
-# Estate Studio — Build 04.1.0 DWG Apartment Mapping
-
-Corecție de concept: importul DWG nu mai este doar viewer + snap.
-
-## Flux
-1. Importă DWG.
-2. Selectează planul etajului din planșă.
-3. `Mapează apartamentele din DWG`.
-4. Estate Studio folosește segmentele vectoriale CAD și TEXT/MTEXT din DWG.
-5. Filtrează linework-ul structural.
-6. Închide virtual golurile de ușă.
-7. Separă camerele/celulele.
-8. Construiește graful conexiunilor prin uși.
-9. Caută holul comun:
-   - întâi după texte CAD: HOL COMUN, CORIDOR, PALIER, CASA SCĂRII, LIFT etc.;
-   - fallback: conectivitate + poziție.
-10. Scoate zona comună.
-11. Camerele interconectate rămase devin apartamente.
-12. Balcoanele rămân în același apartament dacă au conexiune de ușă.
-13. Dacă există AP.01 / AP.02 ca text CAD, codurile sunt folosite fără OCR.
-14. La salvare, creează automat apartamentele și `apartment_polygons`.
-
-## Debug
-- `Arată pereții CAD` afișează albastru exact segmentele vectoriale folosite.
-- Poligoanele propuse apar verde înainte de salvare.
-- Raportul arată:
-  - segmente structurale;
-  - camere/celule;
-  - conexiuni de ușă;
-  - zone comune;
-  - apartamente propuse.
-
-## Important
-Vechiul `Detectează apartamente` raster rămâne eliminat.
-Maparea este acum parte din workflow-ul DWG.
-
-`/api/version` => `04.1.0-dwg-apartment-mapping`
-
-# Estate Studio — Build 04.0.3 Integer Floor Dimensions Fix
-
-Fix definitiv pentru erori de forma:
-
-`invalid input syntax for type integer: "10.699999809265137"`
-
-## Cauza
-În schema Supabase:
-- `floors.plan_width` = INTEGER
-- `floors.plan_height` = INTEGER
-- `floors.floor_number` = INTEGER
-- `floors.sort_order` = INTEGER
-
-Unele DWG/SVG-uri raportează dimensiuni float, de ex. `10.699999809265137`.
-
-## Fix
-Backendul sanitizează acum TOATE update-urile de etaj:
-- `plan_width` → `Math.round(...)`
-- `plan_height` → `Math.round(...)`
-- `floor_number` → integer
-- `sort_order` → integer
-
-Asta înseamnă că chiar dacă un client/browser sau o versiune veche a importerului trimite `10.699999809265137`, serverul trimite către PostgreSQL `11`.
-
-În plus:
-- importerul 04.0.2 păstrează în continuare coordonatele CAD reale în `settings.cad`;
-- câmpurile de preview rămân dimensiuni integer normalizate;
-- DWG crop workflow rămâne neschimbat.
-
-`/api/version` => `04.0.3-integer-floor-dimensions-fix`
-
-# Estate Studio — Build 04.0.2 DWG Plan Crop
-
-Fix pentru DWG-uri foarte mari care conțin mai multe planuri pe aceeași planșă.
-
-## Problema rezolvată
-Exemplu real:
-- 170.576 entități SVG;
-- coordonate CAD de milioane, ex. `5317834.5`;
-- mai multe planuri în același DWG.
-
-`plan_width` / `plan_height` sunt coloane INTEGER, deci coordonatele CAD reale nu trebuie salvate acolo.
-
-## Noul workflow
-1. `Importă DWG`.
-2. Estate Studio convertește DWG-ul în SVG, dar NU îl salvează imediat ca plan.
-3. Se deschide planșa completă.
-4. Tragi un dreptunghi doar peste planul etajului dorit.
-5. Estate Studio:
-   - schimbă viewBox-ul SVG la selecția ta;
-   - extrage numai segmentele CAD care intersectează selecția;
-   - re-normalizează acele segmente la 0..1;
-   - salvează SVG-ul decupat ca `floor.plan_path`;
-   - păstrează DWG-ul original integral separat.
-6. Editorul lucrează numai cu etajul selectat.
-
-## Fix integer
-- coordonatele CAD reale rămân în `floor.settings.cad.original_view_box` / `crop_view_box`;
-- `plan_width` este normalizat la 2000;
-- `plan_height` este calculat proporțional și rotunjit la integer;
-- valoarea CAD `5317834.5` nu mai ajunge niciodată într-o coloană INTEGER.
-
-`/api/version` => `04.0.2-dwg-plan-crop`
-
-# Estate Studio — Build 04.0.1 DWG SVG Parser Fix
-
-Hotfix pentru eroarea:
-`SVG-ul generat din DWG nu a putut fi citit`.
-
-## Cauza probabilă
-LibreDWG poate genera SVG corect geometric, dar unele DWG-uri conțin texte CAD / bytes de control / `&` ne-escape-uit care fac SVG-ul invalid pentru parserul XML strict al browserului.
-
-## Fix
-- acceptă output LibreDWG string sau typed array;
-- elimină BOM și control characters invalide XML;
-- izolează documentul real dintre `<svg>...</svg>`;
-- escape-uiește ampersand-uri CAD nevalide;
-- încearcă întâi parser XML strict;
-- dacă acesta eșuează, folosește parser HTML tolerant ca recovery;
-- serializează din nou într-un SVG XML curat;
-- validează încă o dată înainte de upload;
-- elimină `script` / `foreignObject`;
-- mesajele de eroare includ acum detaliul real de parsing dacă repararea nu reușește.
-
-Nu schimbă workflow-ul:
-DWG → SVG vectorial → CAD Snap → poligoane.
-
-`/api/version` => `04.0.1-dwg-svg-parser-fix`
-
-# Estate Studio — Build 04.0.0 DWG CAD Polygons
-
-Detectorul automat de apartamente a fost ELIMINAT complet.
-
-## Noul workflow
-1. Creezi etajul.
-2. `Importă DWG`.
-3. DWG-ul este citit local în browser cu LibreDWG WebAssembly.
-4. Este convertit într-un SVG vectorial.
-5. SVG-ul este încărcat în `floor-plans` și devine `floor.plan_path`.
-6. DWG-ul original este păstrat în `project-documents`.
-7. Din SVG extragem segmentele vectoriale și le salvăm în `floor.settings.cad`.
-8. Creezi apartamentele din admin.
-9. În editorul de poligoane activezi `Magnet CAD` și punctele se lipesc exact pe geometria derivată din DWG.
-
-## Editor
-- `Magnet CAD` apare automat dacă etajul are DWG importat.
-- La desenare, CAD are prioritate față de snap 0/90°.
-- `Alt/Option` dezactivează temporar snap-ul.
-- `Snap edit` rămâne OFF implicit pentru mutarea liberă a punctelor.
-- `Ghidaje CAD` afișează peste plan segmentele pe care editorul le folosește la snap.
-- Pan-ul și editarea stabilă din 03.8.3 sunt păstrate.
-
-## Fără detector
-- `AutoApartmentDetector.jsx` a fost șters.
-- butonul `Detectează apartamente` a fost șters.
-- endpoint-ul `/api/admin/floors/:id/auto-apartments` a fost șters.
-- Tesseract/OCR nu există în build.
-
-## Stocare
-Nu este necesară migrare DB:
-- preview SVG: `floor.plan_path`;
-- DWG original: `project-documents`;
-- metadata + segmente CAD: `floor.settings.cad`.
-
-## Runtime DWG
-Clientul folosește `@mlightcad/libredwg-web` și copiază WASM-ul în `/assets/` la build.
-
-Notă de licențiere: `@mlightcad/libredwg-web` / LibreDWG este GPL. Pentru utilizare comercială/distribuție trebuie verificată compatibilitatea licenței cu proiectul.
-
-`/api/version` => `04.0.0-dwg-cad-polygons`
+`/api/version` => `04.3.0-png-workflow-restored`
 
 # Estate Studio — Build 03.8.4 Detector Runtime Rollback
 
@@ -836,4 +595,4 @@ Fiecare proiect primește viewer public separat: `/embed/:slug` și cod iframe g
 - documentație arhitecturală stocată per proiect
 
 ## Notă despre generarea 3D din planuri
-Build-ul include modul de proiect `Documentație arhitecturală`, uploadurile și stocarea documentației. Generarea automată a unei geometrii comerciale detaliate din PDF/DWG necesită un motor extern de modelare/AI/CAD; build-ul nu pretinde că inventează acea geometrie în lipsa unui astfel de motor. Fluxul GLB/GLTF este complet funcțional.
+Build-ul include modul de proiect `Documentație arhitecturală` pentru PDF și imagini. Fluxul GLB/GLTF rămâne complet funcțional.
