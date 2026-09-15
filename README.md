@@ -1,3 +1,26 @@
+# Estate Studio — Build 04.4.17 Copy / Flip / Paste & Move
+
+Update peste 04.4.16.
+
+## Clonare poligon pe același plan
+- selectezi apartamentul sursă;
+- **Copiază poligon**;
+- selectezi alt apartament țintă, inclusiv direct prin click pe plan;
+- opțional **Flip H**, **Flip V** sau ambele;
+- **Lipește și mută**;
+- noua geometrie intră în draft-ul apartamentului țintă, fără să copieze ID, cod, status sau alte date;
+- după lipire, tragi direct de interiorul poligonului și se mută **toată forma**;
+- poligonul este limitat în suprafața planului;
+- salvarea în DB se face doar când apeși **Salvează poligon**.
+
+Flip H/V este local, în jurul centrului geometriei copiate, astfel încât forma rămâne în aceeași zonă și poate fi mutată imediat către apartamentul țintă.
+
+## În plus
+- reparat istoricul Undo pentru operațiile care salvează snapshot-ul **înainte** de modificare (delete, insert, paste, draw);
+- drag punct, drag latură, click-select, pan temporar și culorile pe tipologie rămân păstrate.
+
+`/api/version` => `04.4.17-copy-flip-paste-move`
+
 # Estate Studio — Build 04.4.16 Room Type Colors
 
 Update rapid peste 04.4.15.

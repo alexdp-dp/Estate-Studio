@@ -585,3 +585,13 @@ a.primary:hover,
 .plan-public .plan-image-wrap polygon.sold.hovered{
   fill:rgba(190,49,49,.54);
 }
+
+
+/* 04.4.17 — same-floor polygon copy / flip / paste-and-move */
+.polygon-copy-controls{
+  flex-wrap:wrap;
+}
+.copy-mini{
+  margin:0 0 8px;
+  line-height:1.35;
+}

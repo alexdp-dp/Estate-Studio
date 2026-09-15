@@ -177,6 +177,19 @@ function projectedPointOnSegment(raw,a,b){
   return cleanPoint({x:ax+t*dx,y:ay+t*dy});
 }
 
+function transformCopiedPolygon(points,{flipH=false,flipV=false}={}){
+  if(!points?.length)return [];
+  const clean=points.map(cleanPoint);
+  const xs=clean.map(p=>p.x),ys=clean.map(p=>p.y);
+  const minX=Math.min(...xs),maxX=Math.max(...xs);
+  const minY=Math.min(...ys),maxY=Math.max(...ys);
+  const cx=(minX+maxX)/2,cy=(minY+maxY)/2;
+  return clean.map(p=>cleanPoint({
+    x:flipH ? cx-(p.x-cx) : p.x,
+    y:flipV ? cy-(p.y-cy) : p.y
+  }));
+}
+
 export default function PlanEditor({floor,onChanged}){
   const holder=useRef();
   const stageRef=useRef();
@@ -206,6 +219,10 @@ export default function PlanEditor({floor,onChanged}){
   const [selectedEdge,setSelectedEdge]=useState(null);
   const [hoverEdge,setHoverEdge]=useState(null);
   const [undoCount,setUndoCount]=useState(0);
+  const [copiedPolygon,setCopiedPolygon]=useState(null);
+  const [flipH,setFlipH]=useState(false);
+  const [flipV,setFlipV]=useState(false);
+  const [moveWhole,setMoveWhole]=useState(false);
 
   const selected=(floor?.apartments||[]).find(a=>a.id===selectedId);
 
@@ -215,6 +232,10 @@ export default function PlanEditor({floor,onChanged}){
     setSelectedId(floor?.apartments?.[0]?.id||null);
     setScale(1);
     setPos({x:0,y:0});
+    setCopiedPolygon(null);
+    setFlipH(false);
+    setFlipV(false);
+    setMoveWhole(false);
   },[floor?.id]);
 
   useEffect(()=>{
@@ -234,6 +255,7 @@ export default function PlanEditor({floor,onChanged}){
     setSelectedVertex(null);
     setSelectedEdge(null);
     setHoverEdge(null);
+    setMoveWhole(false);
     undoRef.current=[];
     setUndoCount(0);
     setNotice('');
@@ -388,8 +410,6 @@ export default function PlanEditor({floor,onChanged}){
 
   function recordUndo(snapshot){
     const snap=(snapshot||draftRef.current).map(cleanPoint);
-    const current=draftRef.current.map(cleanPoint);
-    if(sameDraft(snap,current))return;
     const stack=undoRef.current;
     const last=stack[stack.length-1];
     if(!last||!sameDraft(last,snap)){
@@ -413,6 +433,7 @@ export default function PlanEditor({floor,onChanged}){
     setSelectedVertex(null);
     setSelectedEdge(null);
     setHoverEdge(null);
+    setMoveWhole(false);
     setUndoCount(stack.length);
     setNotice('Undo · ultima modificare a fost anulată');
   }
@@ -445,6 +466,69 @@ export default function PlanEditor({floor,onChanged}){
       e.cancelBubble=true;
       e.evt?.preventDefault?.();
     }
+  }
+
+  function copyCurrentPolygon(){
+    const current=draftRef.current;
+    if(!selected||current.length<3){
+      setNotice('Selectează un apartament care are deja poligon.');
+      return;
+    }
+    setCopiedPolygon({
+      sourceId:selected.id,
+      sourceCode:selected.code,
+      points:current.map(cleanPoint)
+    });
+    setFlipH(false);
+    setFlipV(false);
+    setNotice(`Copiat ${selected.code} · alege apartamentul țintă`);
+  }
+
+  function pasteAndMove(){
+    if(!copiedPolygon){
+      setNotice('Copiază întâi un poligon.');
+      return;
+    }
+    if(!selected){
+      setNotice('Selectează apartamentul țintă.');
+      return;
+    }
+    if(selected.id===copiedPolygon.sourceId){
+      setNotice('Alege alt apartament ca țintă.');
+      return;
+    }
+
+    const current=draftRef.current.map(cleanPoint);
+    recordUndo(current);
+
+    const next=transformCopiedPolygon(copiedPolygon.points,{flipH,flipV});
+    draftRef.current=next;
+    setDraft(next);
+    setSelectedVertex(null);
+    setSelectedEdge(null);
+    setHoverEdge(null);
+    setMoveWhole(true);
+    setMode('edit');
+
+    const flips=[flipH?'H':'',flipV?'V':''].filter(Boolean).join('+');
+    setNotice(`Lipită geometria din ${copiedPolygon.sourceCode}${flips?` · Flip ${flips}`:''} · trage de interior ca să muți tot poligonul`);
+  }
+
+  function beginPolygonGesture(e){
+    const native=e?.evt;
+    if(!moveWhole||mode!=='edit')return;
+    if(spaceHeld.current || native?.button===1 || (native?.button!==undefined && native.button!==0))return;
+    if(draftRef.current.length<3)return;
+    e.cancelBubble=true;
+    native?.preventDefault?.();
+    editGesture.current={
+      type:'polygon',
+      startPointer:pointerToNorm(),
+      startDraft:draftRef.current.map(cleanPoint)
+    };
+    setSelectedVertex(null);
+    setSelectedEdge(null);
+    setStageCursor('grabbing');
   }
 
   function addPoint(e){
@@ -582,6 +666,20 @@ export default function PlanEditor({floor,onChanged}){
       setDraft(arr);
       return true;
     }
+
+    if(g.type==='polygon'){
+      const xs=g.startDraft.map(p=>p.x),ys=g.startDraft.map(p=>p.y);
+      const minX=Math.min(...xs),maxX=Math.max(...xs);
+      const minY=Math.min(...ys),maxY=Math.max(...ys);
+      const requestedDx=raw.x-g.startPointer.x;
+      const requestedDy=raw.y-g.startPointer.y;
+      const dx=clamp(requestedDx,-minX,1-maxX);
+      const dy=clamp(requestedDy,-minY,1-maxY);
+      const arr=g.startDraft.map(p=>cleanPoint({x:p.x+dx,y:p.y+dy}));
+      draftRef.current=arr;
+      setDraft(arr);
+      return true;
+    }
     return false;
   }
 
@@ -598,6 +696,9 @@ export default function PlanEditor({floor,onChanged}){
     if(g.type==='edge'){
       setNotice('Latură mutată · geometria rămâne ortogonală');
       setStageCursor(g.orientation==='h'?'ns-resize':'ew-resize');
+    }else if(g.type==='polygon'){
+      setNotice('Poligon mutat · salvează când poziția este corectă');
+      setStageCursor(moveWhole?'move':'default');
     }else{
       setNotice('Punct mutat');
       setStageCursor('default');
@@ -646,6 +747,17 @@ export default function PlanEditor({floor,onChanged}){
         <button disabled={!undoCount} onClick={undoLastEdit}>Undo</button>
         <button disabled={selectedVertex===null||draft.length<=3} onClick={()=>deleteVertex(selectedVertex)}>Șterge punct</button>
         <button disabled={selectedEdge===null} onClick={()=>insertVertexOnEdge(selectedEdge,null,true)}>Adaugă punct pe latură</button>
+
+        <div className="segmented polygon-copy-controls">
+          <button disabled={!selected||draft.length<3} onClick={copyCurrentPolygon}>Copiază poligon</button>
+          <button className={flipH?'active':''} disabled={!copiedPolygon} onClick={()=>setFlipH(v=>!v)}>Flip H</button>
+          <button className={flipV?'active':''} disabled={!copiedPolygon} onClick={()=>setFlipV(v=>!v)}>Flip V</button>
+          <button
+            className={moveWhole?'active':''}
+            disabled={!copiedPolygon||!selected||selected.id===copiedPolygon.sourceId}
+            onClick={pasteAndMove}
+          >Lipește și mută</button>
+        </div>
         <button onClick={()=>{setScale(1);setPos({x:0,y:0})}}>Încadrează planul</button>
         <button className="primary" disabled={busy||!selected} onClick={savePolygon}>{busy?'Salvez…':'Salvează poligon'}</button>
         {notice&&<span className="save-notice">✓ {notice}</span>}
@@ -655,6 +767,7 @@ export default function PlanEditor({floor,onChanged}){
       <div className="polygon-layout">
         <div className="apartment-palette">
           <h4>Apartamente</h4>
+          {copiedPolygon&&<div className="empty-mini copy-mini">Copiat: <b>{copiedPolygon.sourceCode}</b>{flipH||flipV?` · Flip ${flipH?'H':''}${flipH&&flipV?'+':''}${flipV?'V':''}`:''}</div>}
           {(floor?.apartments||[]).length===0&&<div className="empty-mini">Creează întâi apartamente pentru acest etaj.</div>}
           {(floor?.apartments||[]).map(a=><button
             key={a.id}
@@ -736,7 +849,11 @@ export default function PlanEditor({floor,onChanged}){
                     points={draft.flatMap(p=>[imgRect.x+p.x*imgRect.w,imgRect.y+p.y*imgRect.h])}
                     closed={draft.length>=3}
                     fill={apartmentPolygonColor(selected,true)} stroke="#0e8f48" strokeWidth={2/scale}
-                    listening={false}
+                    listening={moveWhole}
+                    onMouseEnter={()=>{if(moveWhole&&!spaceHeld.current)setStageCursor('move')}}
+                    onMouseLeave={()=>{if(moveWhole&&!spaceHeld.current&&!editGesture.current)setStageCursor('default')}}
+                    onMouseDown={beginPolygonGesture}
+                    onTouchStart={beginPolygonGesture}
                   />
 
                   {mode==='edit'&&draft.length>=2&&draft.map((p,i)=>{
@@ -803,10 +920,10 @@ export default function PlanEditor({floor,onChanged}){
       </div>
 
       <p className="hint">
-        Poți selecta apartamentul direct din lista din stânga sau prin <b>click pe poligonul lui din plan</b>. În <b>Editează</b>, tragi direct de orice
-        <b>punct</b> sau de o <b>latură</b>. <b>Undo</b> anulează pe rând mutări, ștergeri, puncte adăugate și desenări; merge și cu <b>Ctrl/Cmd + Z</b>.
-        Pentru un punct nou exact pe o dreaptă, dă <b>dublu-click pe latură</b> în locul dorit; alternativ selectează latura și folosește
-        <b>Adaugă punct pe latură</b> pentru mijloc. Ține <b>Space</b> + drag pentru pan sau folosește butonul din mijloc / rotița. Scroll-ul face zoom.
+        Poți selecta apartamentul direct din listă sau prin <b>click pe poligon</b>. Pentru clonare pe același plan: selectează sursa,
+        <b>Copiază poligon</b>, alege apartamentul țintă, opțional <b>Flip H</b>/<b>Flip V</b>, apoi <b>Lipește și mută</b>.
+        După lipire, trage de <b>interiorul poligonului</b> ca să muți toată geometria; Flip-ul se face în jurul centrului propriei forme.
+        Punctele, laturile, Undo, dublu-click pentru punct nou și <b>Space + drag</b> pentru pan rămân active.
       </p>
     </div>
   );
