@@ -1,30 +1,3 @@
-# Estate Studio — Build 04.5.0 Wall-First Room Graph
-
-Build cumulativ peste **04.4.4**. Păstrează `Apartamente`, `Zonă comună`, `Balcoane / terase` și panoul `Rectifică poligoanele`.
-
-## Ce se schimbă fundamental
-Detectorul asistat nu mai pornește direct de la flood-fill pe bitmap. Pentru planurile tehnice curate folosește acum:
-
-1. **Semantic wall mask** — pereții groși au prioritate; stroke-urile lungi sunt păstrate numai dacă aparțin / sunt foarte aproape de rețeaua de pereți. Scopul este să suprime mobilier, texte, arce de uși și obiecte sanitare.
-2. **Temporary door closure** — golurile axiale de dimensiune de ușă sunt închise doar într-o mască temporară. Nu devin pereți în poligonul final.
-3. **Room extraction** — masca temporară produce componente de cameră.
-4. **Door graph** — fiecare bridge de ușă leagă încăperile de pe cele două părți.
-5. **Seed propagation on graph** — seed-urile de apartament / comun / balcon se propagă pe graful de camere, nu prin toate pixelurile imaginii.
-6. **Balcony pass** — recuperarea automată și `Balcoane / terase` din 04.4.2 rămân active.
-7. **Shared orthogonal rectification** — toate apartamentele folosesc aceeași hartă de frontiere, cu linii la 90° și vecini tangențiali.
-
-## Ajustare pentru a urmări mai bine peretele negru
-Pentru că room graph elimină mare parte din zgomot, grila finală este mai fină decât în 04.4.4. Rectificarea nu mai trebuie să se îndepărteze atât de mult de axa peretelui doar ca să elimine mobilierul.
-
-## Diagnostic în UI
-Rezumatul arată acum:
-- `Wall-first Room Graph V5`;
-- număr de încăperi detectate;
-- număr de legături de ușă;
-- `fallback topology` doar dacă room graph nu reușește să păstreze toate apartamentele marcate.
-
-`/api/version` => `04.5.0-wall-first-room-graph`
-
 # Estate Studio — Build 04.4.4 Rectified Topology
 
 IMPORTANT: acest build este făcut cumulativ peste **04.4.2 Balcony Seeds**.
