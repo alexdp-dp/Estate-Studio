@@ -74,12 +74,102 @@ function applySnap(raw, points, {
   return p;
 }
 
+function segmentOrientation(a,b){
+  return Math.abs(a.x-b.x) >= Math.abs(a.y-b.y) ? 'h' : 'v';
+}
+
+function sameAxis(a,b,eps=0.0008){
+  return Math.abs(a.x-b.x)<=eps || Math.abs(a.y-b.y)<=eps;
+}
+
+function sanitizePoint(p){
+  return {x:clamp01(+p.x),y:clamp01(+p.y)};
+}
+
+function simplifyPolygon(points,eps=0.0008){
+  if(points.length<2) return points;
+  const out=[];
+  for(const pt of points){
+    const p=sanitizePoint(pt);
+    const prev=out[out.length-1];
+    if(!prev || distance(prev,p)>eps) out.push(p);
+  }
+  if(out.length>2 && distance(out[0],out[out.length-1])<=eps) out.pop();
+
+  let changed=true;
+  while(changed && out.length>=3){
+    changed=false;
+    for(let i=0;i<out.length;i++){
+      const a=out[(i-1+out.length)%out.length];
+      const b=out[i];
+      const c=out[(i+1)%out.length];
+      const ab=segmentOrientation(a,b);
+      const bc=segmentOrientation(b,c);
+      if(ab===bc){
+        if(ab==='h'){
+          if(Math.abs(a.y-b.y)<=eps && Math.abs(b.y-c.y)<=eps){
+            out.splice(i,1);
+            changed=true;
+            break;
+          }
+        }else{
+          if(Math.abs(a.x-b.x)<=eps && Math.abs(b.x-c.x)<=eps){
+            out.splice(i,1);
+            changed=true;
+            break;
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function orthogonalBridge(prev, removed, next){
+  const o1=segmentOrientation(prev,removed);
+  const o2=segmentOrientation(removed,next);
+
+  let candidateA={x:prev.x,y:next.y};
+  let candidateB={x:next.x,y:prev.y};
+
+  if(o1==='h' && o2==='v') return sanitizePoint({x:next.x,y:prev.y});
+  if(o1==='v' && o2==='h') return sanitizePoint({x:prev.x,y:next.y});
+
+  const score=(c)=>distance(c,removed)+Math.min(distance(c,prev),distance(c,next))*0.05;
+  return sanitizePoint(score(candidateA)<=score(candidateB)?candidateA:candidateB);
+}
+
+function removeVertexOrthogonal(points,index){
+  if(points.length<=3) return points;
+  const arr=points.map(sanitizePoint);
+  const n=arr.length;
+  const prev=arr[(index-1+n)%n];
+  const removed=arr[index];
+  const next=arr[(index+1)%n];
+  const out=arr.filter((_,i)=>i!==index);
+
+  if(sameAxis(prev,next)) return simplifyPolygon(out);
+
+  const elbow=orthogonalBridge(prev,removed,next);
+  const insertAt=index===0?0:index-1<0?0:index;
+
+  const prevInOut=out[(insertAt-1+out.length)%out.length];
+  const nextInOut=out[insertAt%out.length];
+  if(distance(elbow,prevInOut)<=0.0008 || distance(elbow,nextInOut)<=0.0008){
+    return simplifyPolygon(out);
+  }
+
+  out.splice(insertAt,0,elbow);
+  return simplifyPolygon(out);
+}
+
 export default function PlanEditor({floor,onChanged}){
   const holder=useRef();
   const stageRef=useRef();
   const viewportRef=useRef();
   const panWasDragging=useRef(false);
   const vertexDragging=useRef(false);
+  const draftRef=useRef([]);
   const image=useHtmlImage(floor?.plan_path);
   const [size,setSize]=useState({w:900,h:600});
   const [scale,setScale]=useState(1);
@@ -93,8 +183,11 @@ export default function PlanEditor({floor,onChanged}){
   const [snap45,setSnap45]=useState(false);
   const [snapVertices,setSnapVertices]=useState(true);
   const [snapEdit,setSnapEdit]=useState(false);
+  const [selectedVertex,setSelectedVertex]=useState(null);
 
   const selected=(floor?.apartments||[]).find(a=>a.id===selectedId);
+
+  useEffect(()=>{ draftRef.current=draft; },[draft]);
 
   useEffect(()=>{
     setSelectedId(floor?.apartments?.[0]?.id||null);
@@ -114,9 +207,24 @@ export default function PlanEditor({floor,onChanged}){
 
   useEffect(()=>{
     const ps=polygonPoints(selected);
-    setDraft(ps.map(p=>({x:+p.x,y:+p.y})));
+    const clean=simplifyPolygon(ps.map(p=>({x:+p.x,y:+p.y})));
+    setDraft(clean);
+    setSelectedVertex(clean.length?0:null);
     setNotice('');
   },[selectedId,selected?.apartment_polygons]);
+
+  useEffect(()=>{
+    function onKey(e){
+      const tag=(e.target?.tagName||'').toLowerCase();
+      if(tag==='input' || tag==='textarea') return;
+      if((e.key==='Delete' || e.key==='Backspace') && selectedVertex!==null){
+        e.preventDefault();
+        deleteVertex(selectedVertex);
+      }
+    }
+    window.addEventListener('keydown',onKey);
+    return()=>window.removeEventListener('keydown',onKey);
+  },[selectedVertex,draft]);
 
   const imgRect=useMemo(()=>{
     if(!image) return {x:0,y:0,w:size.w,h:size.h};
@@ -136,9 +244,6 @@ export default function PlanEditor({floor,onChanged}){
     const p=st?.getPointerPosition();
     if(!st || !viewport || !p) return {x:0,y:0};
 
-    // Always convert the CURRENT pointer through the inverse viewport transform.
-    // Never trust a dragged Circle's local x/y, because Konva can update those
-    // before React re-renders and that was the source of the "plan flies away" bug.
     const local=viewport.getAbsoluteTransform().copy().invert().point(p);
     return {
       x:clamp01((local.x-imgRect.x)/imgRect.w),
@@ -147,8 +252,6 @@ export default function PlanEditor({floor,onChanged}){
   }
 
   function clampPan(next,atScale=scale){
-    // Keep at least a visible strip of the canvas on screen. Pan can never throw
-    // the whole plan outside the viewport.
     const keep=Math.min(90,Math.max(44,Math.min(size.w,size.h)*.10));
     const scaledW=size.w*atScale;
     const scaledH=size.h*atScale;
@@ -168,13 +271,18 @@ export default function PlanEditor({floor,onChanged}){
     const disableSnap=e?.evt?.altKey || e?.evt?.metaKey;
     const snapped=disableSnap
       ? raw
-      : applySnap(raw,draft,{
+      : applySnap(raw,draftRef.current,{
           snapOrtho:snapOrtho || force45,
           snap45:snap45 || force45,
           snapVertices
         });
 
-    setDraft(v=>[...v,snapped]);
+    setDraft(v=>{
+      const next=[...v,snapped];
+      draftRef.current=next;
+      setSelectedVertex(next.length-1);
+      return next;
+    });
   }
 
   async function savePolygon(){
@@ -222,25 +330,23 @@ export default function PlanEditor({floor,onChanged}){
     setPos(nextPos);
   }
 
-  function dragVertex(i,e){
+  function moveVertex(i,e){
     e.cancelBubble=true;
-
     const raw=pointerToNorm();
     const forceSnap=!!e?.evt?.shiftKey;
     const disableSnap=!!(e?.evt?.altKey || e?.evt?.metaKey);
 
     setDraft(v=>{
       const arr=[...v];
-
-      // Editing is FREE by default. This is intentionally different from drawing.
-      // Hold Shift (or enable "Snap edit") only when you actually want geometry snap.
       if(!snapEdit && !forceSnap){
-        arr[i]=raw;
+        arr[i]=sanitizePoint(raw);
+        draftRef.current=arr;
         return arr;
       }
 
       if(disableSnap){
-        arr[i]=raw;
+        arr[i]=sanitizePoint(raw);
+        draftRef.current=arr;
         return arr;
       }
 
@@ -250,7 +356,6 @@ export default function PlanEditor({floor,onChanged}){
         neighbours.push(arr[(i+1)%arr.length]);
       }
 
-      // Pick the nearest neighbour as the temporary snap anchor.
       let anchor=neighbours[0]||null;
       if(neighbours.length===2){
         anchor=distance(raw,neighbours[0])<=distance(raw,neighbours[1])
@@ -264,18 +369,18 @@ export default function PlanEditor({floor,onChanged}){
             snap45:snap45 || forceSnap,
             snapVertices:false
           })
-        : raw;
+        : sanitizePoint(raw);
 
+      draftRef.current=arr;
       return arr;
     });
   }
 
-  function beginVertexDrag(e){
+  function beginVertexDrag(index,e){
+    setSelectedVertex(index);
     vertexDragging.current=true;
     panWasDragging.current=false;
     e.cancelBubble=true;
-
-    // Freeze viewport transform while editing a vertex.
     const viewport=viewportRef.current;
     if(viewport){
       viewport.stopDrag?.();
@@ -283,36 +388,43 @@ export default function PlanEditor({floor,onChanged}){
     }
   }
 
-  function endVertexDrag(e){
+  function endVertexDrag(index,e){
     e.cancelBubble=true;
-
-    // Re-read the final pointer once, rather than accepting a stale Konva node position.
     const st=stageRef.current;
-    if(st && e?.evt)st.setPointersPositions(e.evt);
-
+    if(st && e?.evt) st.setPointersPositions(e.evt);
     vertexDragging.current=false;
-
     const viewport=viewportRef.current;
-    if(viewport)viewport.draggable(mode==='pan');
-
-    // Force the actual Konva handle back to the canonical React coordinate.
-    requestAnimationFrame(()=>{
-      const p=draft[e.target?.index];
-      if(!p)return;
-      e.target.position({
-        x:imgRect.x+p.x*imgRect.w,
-        y:imgRect.y+p.y*imgRect.h
-      });
+    if(viewport) viewport.draggable(mode==='pan');
+    const p=draftRef.current[index];
+    if(!p) return;
+    e.target.position({
+      x:imgRect.x+p.x*imgRect.w,
+      y:imgRect.y+p.y*imgRect.h
     });
   }
 
+  function deleteVertex(index=selectedVertex){
+    if(index===null || index===undefined) return;
+    setDraft(v=>{
+      if(v.length<=3){
+        alert('Poligonul trebuie să rămână cu minimum 3 puncte.');
+        return v;
+      }
+      const next=removeVertexOrthogonal(v,index);
+      draftRef.current=next;
+      const newIndex=Math.min(index,next.length-1);
+      setSelectedVertex(newIndex>=0?newIndex:null);
+      setNotice('Punct șters · contur refăcut ortogonal');
+      return next;
+    });
+  }
 
   return (
     <div className="polygon-workspace">
       <div className="polygon-toolbar">
         <div className="segmented">
           <button className={mode==='edit'?'active':''} onClick={()=>setMode('edit')}>Editează</button>
-          <button className={mode==='draw'?'active':''} onClick={()=>{setMode('draw');setDraft([])}}>Desenează nou</button>
+          <button className={mode==='draw'?'active':''} onClick={()=>{setMode('draw');setDraft([]);setSelectedVertex(null)}}>Desenează nou</button>
           <button className={mode==='pan'?'active':''} onClick={()=>setMode('pan')}>Pan</button>
         </div>
 
@@ -323,7 +435,13 @@ export default function PlanEditor({floor,onChanged}){
           <button className={snapEdit?'active':''} onClick={()=>setSnapEdit(v=>!v)}>Snap edit</button>
         </div>
 
-        <button onClick={()=>setDraft(v=>v.slice(0,-1))}>Undo punct</button>
+        <button onClick={()=>setDraft(v=>{
+          const next=v.slice(0,-1);
+          draftRef.current=next;
+          setSelectedVertex(next.length?next.length-1:null);
+          return next;
+        })}>Undo punct</button>
+        <button disabled={selectedVertex===null || draft.length<=3} onClick={()=>deleteVertex(selectedVertex)}>Șterge punct</button>
         <button onClick={()=>{setScale(1);setPos({x:0,y:0})}}>Încadrează planul</button>
         <button className="primary" disabled={busy||!selected} onClick={savePolygon}>
           {busy?'Salvez…':'Salvează poligon'}
@@ -385,7 +503,6 @@ export default function PlanEditor({floor,onChanged}){
                 }}
                 onDragEnd={e=>{
                   if(vertexDragging.current)return;
-                  // Stage-ul rămâne fix. Doar viewportul intern primește poziția finală.
                   const p=clampPan({x:e.target.x(),y:e.target.y()});
                   e.target.position(p);
                   setPos(p);
@@ -397,57 +514,57 @@ export default function PlanEditor({floor,onChanged}){
                 <Rect width={size.w} height={size.h} fill="#e9edea"/>
                 {image && <KImage image={image} x={imgRect.x} y={imgRect.y} width={imgRect.w} height={imgRect.h}/>}
 
-              {(floor?.apartments||[]).filter(a=>a.id!==selectedId).map(a=>{
-                const ps=polygonPoints(a);
-                if(ps.length<3) return null;
-                const arr=ps.flatMap(p=>[imgRect.x+p.x*imgRect.w,imgRect.y+p.y*imgRect.h]);
-                return (
-                  <Line
-                    key={a.id}
-                    points={arr}
-                    closed
-                    fill={a.status==='available'?'rgba(33,194,101,.20)':a.status==='reserved'?'rgba(236,164,45,.20)':'rgba(220,72,72,.20)'}
-                    stroke="rgba(15,20,18,.45)"
-                    strokeWidth={1/scale}
-                  />
-                );
-              })}
+                {(floor?.apartments||[]).filter(a=>a.id!==selectedId).map(a=>{
+                  const ps=polygonPoints(a);
+                  if(ps.length<3) return null;
+                  const arr=ps.flatMap(p=>[imgRect.x+p.x*imgRect.w,imgRect.y+p.y*imgRect.h]);
+                  return (
+                    <Line
+                      key={a.id}
+                      points={arr}
+                      closed
+                      fill={a.status==='available'?'rgba(33,194,101,.20)':a.status==='reserved'?'rgba(236,164,45,.20)':'rgba(220,72,72,.20)'}
+                      stroke="rgba(15,20,18,.45)"
+                      strokeWidth={1/scale}
+                    />
+                  );
+                })}
 
-              {draft.length>0 && <>
-                <Line
-                  points={draft.flatMap(p=>[imgRect.x+p.x*imgRect.w,imgRect.y+p.y*imgRect.h])}
-                  closed={draft.length>=3}
-                  fill="rgba(19,173,88,.26)"
-                  stroke="#0e8f48"
-                  strokeWidth={2/scale}
-                />
-                {draft.map((p,i)=>(
-                  <Circle
-                    key={i}
-                    x={imgRect.x+p.x*imgRect.w}
-                    y={imgRect.y+p.y*imgRect.h}
-                    radius={6/scale}
-                    fill="#fff"
-                    stroke="#0a1811"
-                    strokeWidth={1.5/scale}
-                    draggable={mode==='edit'}
-                    dragBoundFunc={p=>({
-                      x:Math.max(imgRect.x,Math.min(imgRect.x+imgRect.w,p.x)),
-                      y:Math.max(imgRect.y,Math.min(imgRect.y+imgRect.h,p.y))
-                    })}
-                    onMouseDown={e=>{e.cancelBubble=true}}
-                    onTouchStart={e=>{e.cancelBubble=true}}
-                    onDragStart={beginVertexDrag}
-                    onDragMove={e=>dragVertex(i,e)}
-                    onDragEnd={e=>{
-                      e.cancelBubble=true;
-                      vertexDragging.current=false;
-                      const viewport=viewportRef.current;
-                      if(viewport)viewport.draggable(mode==='pan');
-                    }}
+                {draft.length>0 && <>
+                  <Line
+                    points={draft.flatMap(p=>[imgRect.x+p.x*imgRect.w,imgRect.y+p.y*imgRect.h])}
+                    closed={draft.length>=3}
+                    fill="rgba(19,173,88,.26)"
+                    stroke="#0e8f48"
+                    strokeWidth={2/scale}
                   />
-                ))}
-              </>}
+                  {draft.map((p,i)=>(
+                    <Circle
+                      key={i}
+                      x={imgRect.x+p.x*imgRect.w}
+                      y={imgRect.y+p.y*imgRect.h}
+                      radius={(selectedVertex===i?7:6)/scale}
+                      fill={selectedVertex===i?'#ffe16a':'#fff'}
+                      stroke={selectedVertex===i?'#aa7300':'#0a1811'}
+                      strokeWidth={1.6/scale}
+                      draggable={mode==='edit'}
+                      dragBoundFunc={pt=>({
+                        x:Math.max(imgRect.x,Math.min(imgRect.x+imgRect.w,pt.x)),
+                        y:Math.max(imgRect.y,Math.min(imgRect.y+imgRect.h,pt.y))
+                      })}
+                      onClick={e=>{e.cancelBubble=true;setSelectedVertex(i);}}
+                      onTap={e=>{e.cancelBubble=true;setSelectedVertex(i);}}
+                      onDblClick={e=>{e.cancelBubble=true;setSelectedVertex(i);deleteVertex(i);}}
+                      onDblTap={e=>{e.cancelBubble=true;setSelectedVertex(i);deleteVertex(i);}}
+                      onContextMenu={e=>{e.evt.preventDefault();e.cancelBubble=true;setSelectedVertex(i);deleteVertex(i);}}
+                      onMouseDown={e=>{e.cancelBubble=true;setSelectedVertex(i);}}
+                      onTouchStart={e=>{e.cancelBubble=true;setSelectedVertex(i);}}
+                      onDragStart={e=>beginVertexDrag(i,e)}
+                      onDragMove={e=>moveVertex(i,e)}
+                      onDragEnd={e=>endVertexDrag(i,e)}
+                    />
+                  ))}
+                </>}
 
                 {!image && <Text text="Încarcă planul etajului înainte de desenare" x={30} y={40} fontSize={18} fill="#55605b"/>}
               </Group>
@@ -457,9 +574,9 @@ export default function PlanEditor({floor,onChanged}){
       </div>
 
       <p className="hint">
-        La <b>Editează</b>, punctele se mișcă liber, exact unde le tragi. Snap-ul la editare este oprit implicit;
-        îl activezi din <b>Snap edit</b> sau ții <b>Shift</b> temporar. La desenare rămân active 0/90°, 45° și lipirea pe vertex-uri.
-        Punctele sunt limitate strict la suprafața planului, iar pan-ul este limitat astfel încât planul nu mai poate ieși complet din viewport.
+        La <b>Editează</b>, punctele se mută din nou liber prin drag. Poți selecta un punct și îl ștergi din butonul <b>Șterge punct</b>,
+        din <b>Delete / Backspace</b>, dublu-click sau click dreapta. La ștergere, conturul se reface ortogonal între punctele adiacente,
+        fără diagonale. Snap-ul la editare rămâne opțional din <b>Snap edit</b> sau temporar cu <b>Shift</b>.
       </p>
     </div>
   );
