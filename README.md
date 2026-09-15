@@ -1,3 +1,26 @@
+# Estate Studio — Build 04.4.6 Strict Orthogonal Corners
+
+Build cumulativ peste 04.4.5. Detectorul / maparea apartamentelor NU este schimbată.
+
+## Fix geometric
+Pasul `Aliniază + colțuri 90°` face acum două lucruri după wall-center alignment:
+
+- reconstruiește poligonul exclusiv din drepte **orizontale / verticale**;
+- colțurile sunt intersecții H/V exacte, deci nu mai pot rezulta diagonale;
+- elimină secvențe H-V-H / V-H-V scurte (dogleg / treaptă) când reprezintă aceeași axă de perete;
+- elimină muchiile consecutive de aceeași orientare rezultate din zgomot raster;
+- păstrează coordonatele canonice deja sincronizate pentru pereții comuni;
+- dacă rectificarea ar deforma prea mult aria apartamentului, păstrează geometria detectată și marchează conturul pentru verificare în loc să inventeze o formă.
+
+## Păstrat
+- Apartamente / Zonă comună / Balcoane-terase;
+- rectificarea Topology existentă;
+- wall-center sampling pe PNG-ul original;
+- limite comune sincronizate;
+- fallback / revenire la conturul detectat.
+
+`/api/version` => `04.4.6-strict-orthogonal-corners`
+
 # Estate Studio — Build 04.4.5 Wall Center Alignment
 
 Build cumulativ peste **04.4.4 Rectified Topology**. Detectorul de apartamente NU este înlocuit.

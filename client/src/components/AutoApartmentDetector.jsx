@@ -1220,6 +1220,145 @@ function reconcileSharedEdgeCoordinates(edges,w,h){
   }
 }
 
+
+function weightedAxisCoord(edges){
+  let num=0,den=0;
+  for(const e of edges){
+    const len=Math.max(1,e.spanMax-e.spanMin);
+    const trust=Math.max(.12,e.confidence||0)+(e.sharedResolved?.45:0);
+    const weight=len*trust;
+    num+=e.coord*weight;den+=weight;
+  }
+  return den?num/den:median(edges.map(e=>e.coord));
+}
+
+function mergeEdgeRecords(edges){
+  const coord=weightedAxisCoord(edges);
+  return {
+    ...edges[0],
+    coord,
+    originalCoord:weightedAxisCoord(edges.map(e=>({...e,coord:e.originalCoord}))),
+    confidence:Math.max(...edges.map(e=>e.confidence||0)),
+    support:Math.max(...edges.map(e=>e.support||0)),
+    spanMin:Math.min(...edges.map(e=>e.spanMin)),
+    spanMax:Math.max(...edges.map(e=>e.spanMax)),
+    sharedResolved:edges.some(e=>e.sharedResolved)
+  };
+}
+
+function rotateCycle(items,start){
+  return items.slice(start).concat(items.slice(0,start));
+}
+
+function strictOrthogonalEdgeCleanup(inputEdges,w,h){
+  let edges=inputEdges.filter(Boolean).map(e=>({...e}));
+  const dim=Math.min(w,h);
+  const shortEdge=Math.max(14,dim*.040);
+  const maxDoglegDepth=Math.max(8,dim*.018);
+  let removedDoglegs=0,mergedSameAxis=0,guard=0;
+
+  // A valid orthogonal polygon alternates H/V/H/V. Consecutive edges with the
+  // same orientation are leftovers from raster steps or a previously moved corner.
+  while(edges.length>4&&guard++<100){
+    let changed=false;
+    for(let i=0;i<edges.length;i++){
+      const j=(i+1)%edges.length;
+      if(edges[i].orientation!==edges[j].orientation)continue;
+      const rotated=rotateCycle(edges,i);
+      const merged=mergeEdgeRecords([rotated[0],rotated[1]]);
+      edges=[merged].concat(rotated.slice(2));
+      mergedSameAxis++;changed=true;break;
+    }
+    if(!changed)break;
+  }
+
+  // Remove small H-V-H / V-H-V excursions. These are the characteristic
+  // door-jamb / furniture / raster "steps" visible in the screenshots.
+  guard=0;
+  while(edges.length>4&&guard++<120){
+    let changed=false;
+    for(let i=0;i<edges.length;i++){
+      const rotated=rotateCycle(edges,i);
+      const a=rotated[0],b=rotated[1],c=rotated[2];
+      if(!a||!b||!c)continue;
+      if(a.orientation!==c.orientation||a.orientation===b.orientation)continue;
+
+      const depth=Math.abs(a.coord-c.coord);
+      const bridgeLen=Math.max(0,b.spanMax-b.spanMin);
+      const outerSupport=Math.max(a.confidence||0,c.confidence||0);
+      const wallAgreement=depth<=maxDoglegDepth;
+      const shortBridge=bridgeLen<=shortEdge;
+
+      // If the two long sides are essentially the same wall axis and the connector
+      // is short, flatten the excursion into one straight wall. Strong wall evidence
+      // allows a slightly wider door opening without following its jamb.
+      if(wallAgreement && (shortBridge || (outerSupport>=.52&&bridgeLen<=shortEdge*1.65))){
+        const merged=mergeEdgeRecords([a,c]);
+        merged.spanMin=Math.min(a.spanMin,c.spanMin,b.spanMin);
+        merged.spanMax=Math.max(a.spanMax,c.spanMax,b.spanMax);
+        edges=[merged].concat(rotated.slice(3));
+        removedDoglegs++;changed=true;break;
+      }
+    }
+    if(!changed)break;
+  }
+
+  // One more pass removes any same-axis pair exposed by dogleg deletion.
+  guard=0;
+  while(edges.length>4&&guard++<50){
+    let changed=false;
+    for(let i=0;i<edges.length;i++){
+      const j=(i+1)%edges.length;
+      if(edges[i].orientation!==edges[j].orientation)continue;
+      const rotated=rotateCycle(edges,i);
+      const merged=mergeEdgeRecords([rotated[0],rotated[1]]);
+      edges=[merged].concat(rotated.slice(2));
+      mergedSameAxis++;changed=true;break;
+    }
+    if(!changed)break;
+  }
+
+  return {edges,removedDoglegs,mergedSameAxis};
+}
+
+function verticesFromOrthogonalEdges(edges,w,h){
+  if(edges.length<4)return [];
+  const points=[];
+  for(let i=0;i<edges.length;i++){
+    const prev=edges[(i-1+edges.length)%edges.length];
+    const cur=edges[i];
+    if(prev.orientation===cur.orientation)return [];
+    const hEdge=prev.orientation==='h'?prev:cur;
+    const vEdge=prev.orientation==='v'?prev:cur;
+    points.push({
+      x:clamp(vEdge.coord/w,0,1),
+      y:clamp(hEdge.coord/h,0,1)
+    });
+  }
+
+  // Only remove exact collinear duplicates. Never RDP/smooth here: that can
+  // reintroduce diagonals or move a shared boundary independently.
+  const compact=[];
+  for(let i=0;i<points.length;i++){
+    const a=points[(i-1+points.length)%points.length];
+    const b=points[i];
+    const c=points[(i+1)%points.length];
+    const collinear=(Math.abs(a.x-b.x)<1e-7&&Math.abs(b.x-c.x)<1e-7)||
+      (Math.abs(a.y-b.y)<1e-7&&Math.abs(b.y-c.y)<1e-7);
+    if(!collinear)compact.push(b);
+  }
+  return compact;
+}
+
+function polygonHasOnlyOrthogonalEdges(points,tol=1e-7){
+  if(points.length<4)return false;
+  for(let i=0;i<points.length;i++){
+    const a=points[i],b=points[(i+1)%points.length];
+    if(Math.abs(a.x-b.x)>tol&&Math.abs(a.y-b.y)>tol)return false;
+  }
+  return true;
+}
+
 function alignDetectionsToWallCenters(detections,imageData,w,h){
   const originalDetections=detections.map(d=>({...d,points:d.points.map(p=>({...p}))}));
   const working=originalDetections.map(d=>({
@@ -1256,58 +1395,49 @@ function alignDetectionsToWallCenters(detections,imageData,w,h){
   });
 
   let alignedEdges=0,unresolvedEdges=0,sharedEdges=0,totalConfidence=0;
+  let removedDoglegs=0,mergedSameAxis=0,orthogonalPolygons=0;
   const aligned=working.map((d,di)=>{
-    const pts=d.points;
-    const pe=byPoly.get(di)||[];
-    const next=[];
+    const pe=(byPoly.get(di)||[]).filter(Boolean);
     const issues=[];
+    const cleaned=strictOrthogonalEdgeCleanup(pe,w,h);
+    removedDoglegs+=cleaned.removedDoglegs;
+    mergedSameAxis+=cleaned.mergedSameAxis;
 
-    for(let i=0;i<pts.length;i++){
-      const prev=pe[(i-1+pts.length)%pts.length];
-      const cur=pe[i];
-      const original=pts[i];
-      let x=original.x*w,y=original.y*h;
+    const rebuilt=verticesFromOrthogonalEdges(cleaned.edges,w,h);
 
-      if(prev&&cur&&prev.orientation!==cur.orientation){
-        const hEdge=prev.orientation==='h'?prev:cur;
-        const vEdge=prev.orientation==='v'?prev:cur;
-        x=vEdge.coord;y=hEdge.coord;
-      }
-      next.push({x:clamp(x/w,0,1),y:clamp(y/h,0,1)});
-    }
-
-    // Collinear-point removal does not move any boundary and is safe per polygon.
-    const compact=[];
-    for(let i=0;i<next.length;i++){
-      const a=next[(i-1+next.length)%next.length],b=next[i],c=next[(i+1)%next.length];
-      const collinear=(Math.abs(a.x-b.x)<1e-6&&Math.abs(b.x-c.x)<1e-6)||(Math.abs(a.y-b.y)<1e-6&&Math.abs(b.y-c.y)<1e-6);
-      if(!collinear)compact.push(b);
-    }
-
-    // Sanity guard: never replace a detected apartment with a wildly distorted polygon.
+    // Sanity guard: strict 90° output is accepted only if it stays close to the
+    // detected apartment area. Otherwise keep the detected polygon and flag it.
     const oldArea=Math.abs(polygonSignedAreaNorm(d.points));
-    const newArea=Math.abs(polygonSignedAreaNorm(compact));
+    const newArea=Math.abs(polygonSignedAreaNorm(rebuilt));
     const areaRatio=oldArea?newArea/oldArea:1;
-    const sane=compact.length>=4&&areaRatio>.72&&areaRatio<1.28;
-    const finalPoints=sane?compact:d.points;
+    const sane=rebuilt.length>=4&&polygonHasOnlyOrthogonalEdges(rebuilt)&&areaRatio>.70&&areaRatio<1.30;
+    const finalPoints=sane?rebuilt:d.points;
+    if(sane)orthogonalPolygons++;
 
-    for(const e of pe){
-      if(!e)continue;
-      totalConfidence+=e.confidence;
+    for(let i=0;i<cleaned.edges.length;i++){
+      const e=cleaned.edges[i];
+      totalConfidence+=e.confidence||0;
       if(e.sharedResolved)sharedEdges++;
-      if(e.confidence>=.34||e.sharedResolved)alignedEdges++;
+      if((e.confidence||0)>=.34||e.sharedResolved)alignedEdges++;
       else{
         unresolvedEdges++;
-        const a=finalPoints[Math.min(e.ei,finalPoints.length-1)];
-        const b=finalPoints[(Math.min(e.ei,finalPoints.length-1)+1)%finalPoints.length];
+        const a=finalPoints[i%finalPoints.length];
+        const b=finalPoints[(i+1)%finalPoints.length];
         if(a&&b)issues.push({a,b});
       }
+    }
+
+    // If the strict rebuild was rejected, make the whole outline visible as needing
+    // manual verification rather than pretending that diagonal/stepped geometry is OK.
+    if(!sane&&finalPoints.length>=2){
+      for(let i=0;i<finalPoints.length;i++)issues.push({a:finalPoints[i],b:finalPoints[(i+1)%finalPoints.length]});
     }
 
     return {
       ...d,
       points:finalPoints,
       wallAligned:sane,
+      orthogonalAligned:sane,
       alignmentIssues:issues
     };
   });
@@ -1318,6 +1448,9 @@ function alignDetectionsToWallCenters(detections,imageData,w,h){
       alignedEdges,
       unresolvedEdges,
       sharedEdges,
+      removedDoglegs,
+      mergedSameAxis,
+      orthogonalPolygons,
       meanConfidence:edges.length?totalConfidence/edges.length:0
     }
   };
@@ -1776,7 +1909,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         wallAligned:true,
         wallAlignment:aligned.stats
       });
-      setMessage(`✓ Aliniere pe axul pereților: ${aligned.stats.alignedEdges} laturi aliniate · ${aligned.stats.sharedEdges} limite comune sincronizate · ${aligned.stats.unresolvedEdges} laturi păstrate pentru verificare.`);
+      setMessage(`✓ Aliniere + 90°: ${aligned.stats.orthogonalPolygons} poligoane strict ortogonale · ${aligned.stats.removedDoglegs} trepte eliminate · ${aligned.stats.sharedEdges} limite comune sincronizate · ${aligned.stats.unresolvedEdges} laturi de verificat.`);
     }catch(e){
       setMessage(`Alinierea pe pereți a eșuat: ${e.message}`);
     }finally{
@@ -1877,7 +2010,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     <div className="modal-card auto-detector-card">
       <button className="x" onClick={onClose}>×</button>
       <div className="auto-head">
-        <div><small>PNG TOPOLOGY · V4.2</small><h2>Detectează apartamentele</h2><p>Maparea Topology rămâne neschimbată. După detecție ai un pas separat „Aliniază pe centrul pereților”: măsoară PNG-ul original pe toată lungimea fiecărei laturi, continuă axul peste golurile de uși și sincronizează limitele comune.</p></div>
+        <div><small>PNG TOPOLOGY · V4.3</small><h2>Detectează apartamentele</h2><p>Maparea Topology rămâne neschimbată. Pasul de aliniere măsoară axul pereților pe PNG-ul original și apoi reconstruiește conturul strict ortogonal: doar linii orizontale/verticale, colțuri de 90° și fără trepte scurte în jurul ușilor.</p></div>
       </div>
 
       <div className="detector-settings detector-settings-v2">
@@ -2000,16 +2133,16 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
 
         {guided&&<div className="wall-align-panel">
           <div className="wall-align-copy">
-            <b>Aliniază pe centrul pereților</b>
-            <span>Nu redetectează apartamentele. Folosește PNG-ul original, măsoară aceeași latură în mai multe puncte, ignoră detaliile locale și continuă axul peste golurile de uși.</span>
+            <b>Aliniază pe centrul pereților + colțuri 90°</b>
+            <span>Nu redetectează apartamentele. După wall-center alignment elimină dogleg-urile scurte, interzice diagonalele și reconstruiește fiecare colț din intersecția unei axe orizontale cu una verticală.</span>
             {result.wallAlignment&&<small>
-              {result.wallAlignment.alignedEdges} laturi aliniate · {result.wallAlignment.sharedEdges} limite comune · {result.wallAlignment.unresolvedEdges} laturi nemutate (nesigure)
+              {result.wallAlignment.orthogonalPolygons||0} poligoane 90° · {result.wallAlignment.removedDoglegs||0} trepte eliminate · {result.wallAlignment.sharedEdges} limite comune · {result.wallAlignment.unresolvedEdges} laturi de verificat
             </small>}
           </div>
           <div className="wall-align-actions">
             {alignmentBase&&<button disabled={busy} onClick={restoreDetectedGeometry}>Revino la contur detectat</button>}
             <button className="primary" disabled={busy||!raw} onClick={alignToWallCenters}>
-              {busy?'Aliniez…':'Aliniază pe centrul pereților'}
+              {busy?'Aliniez…':'Aliniază + colțuri 90°'}
             </button>
           </div>
         </div>}
