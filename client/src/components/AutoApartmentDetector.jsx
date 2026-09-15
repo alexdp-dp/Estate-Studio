@@ -977,6 +977,352 @@ function orthogonalContourForLabel(labelMap,target,w,h){
   }));
 }
 
+
+function median(values){
+  if(!values?.length)return 0;
+  const a=values.slice().sort((x,y)=>x-y);
+  const m=Math.floor(a.length/2);
+  return a.length%2?a[m]:(a[m-1]+a[m])/2;
+}
+
+function wallInkAt(data,w,h,x,y){
+  x=Math.round(x);y=Math.round(y);
+  if(x<0||y<0||x>=w||y>=h)return 0;
+  const i=(y*w+x)*4;
+  if(data[i+3]<40)return 0;
+  const r=data[i],g=data[i+1],b=data[i+2];
+  const luma=.299*r+.587*g+.114*b;
+  // Distance from white catches black walls but also thin coloured balcony/parapet lines.
+  const chromaInk=255-Math.min(r,g,b);
+  return Math.max(255-luma,chromaInk*.78);
+}
+
+function wallRunsAcrossNormal(imageData,w,h,orientation,along,baseCoord,searchRadius){
+  const data=imageData.data;
+  const hits=[];
+  const threshold=82;
+  let active=false,start=0;
+
+  for(let d=-searchRadius;d<=searchRadius;d++){
+    const x=orientation==='h'?along:baseCoord+d;
+    const y=orientation==='h'?baseCoord+d:along;
+    const ink=wallInkAt(data,w,h,x,y);
+    const on=ink>=threshold;
+    if(on&&!active){active=true;start=d}
+    if((!on||d===searchRadius)&&active){
+      const end=on&&d===searchRadius?d:d-1;
+      const thickness=end-start+1;
+      const center=baseCoord+(start+end)/2;
+      if(thickness>=1&&thickness<=Math.max(24,searchRadius*1.35)){
+        hits.push({center,start:baseCoord+start,end:baseCoord+end,thickness});
+      }
+      active=false;
+    }
+  }
+
+  // Double-line wall / thin parapet fallback: treat two close parallel strokes as one wall band.
+  const paired=hits.slice();
+  for(let i=0;i<hits.length;i++){
+    for(let j=i+1;j<hits.length;j++){
+      const outerStart=Math.min(hits[i].start,hits[j].start);
+      const outerEnd=Math.max(hits[i].end,hits[j].end);
+      const outerWidth=outerEnd-outerStart+1;
+      if(outerWidth<=Math.max(30,searchRadius*1.55)){
+        paired.push({
+          center:(outerStart+outerEnd)/2,
+          start:outerStart,
+          end:outerEnd,
+          thickness:Math.max(hits[i].thickness,hits[j].thickness),
+          paired:true
+        });
+      }
+    }
+  }
+  return paired;
+}
+
+function fitWallAxisForSegment(imageData,w,h,a,b){
+  const x1=a.x*w,y1=a.y*h,x2=b.x*w,y2=b.y*h;
+  const dx=x2-x1,dy=y2-y1;
+  const orientation=Math.abs(dx)>=Math.abs(dy)?'h':'v';
+  const alongStart=orientation==='h'?Math.min(x1,x2):Math.min(y1,y2);
+  const alongEnd=orientation==='h'?Math.max(x1,x2):Math.max(y1,y2);
+  const originalCoord=orientation==='h'?(y1+y2)/2:(x1+x2)/2;
+  const length=alongEnd-alongStart;
+  const dim=Math.min(w,h);
+  const searchRadius=Math.max(9,Math.min(42,Math.round(dim*.022)));
+  const sampleCount=clamp(Math.round(length/18),9,52);
+  const trim=length>40?Math.min(length*.08,18):0;
+  const candidates=[];
+
+  for(let si=0;si<sampleCount;si++){
+    const t=sampleCount===1?.5:si/(sampleCount-1);
+    const along=alongStart+trim+(length-2*trim)*t;
+    const runs=wallRunsAcrossNormal(imageData,w,h,orientation,along,originalCoord,searchRadius);
+    for(const run of runs){
+      const dist=Math.abs(run.center-originalCoord);
+      if(dist<=searchRadius){
+        candidates.push({...run,sample:si,dist});
+      }
+    }
+  }
+
+  if(!candidates.length){
+    return {orientation,coord:originalCoord,originalCoord,confidence:0,support:0,length,reason:'no-wall'};
+  }
+
+  // Cluster candidate wall centres ACROSS the entire side. Isolated furniture/door arcs
+  // do not receive enough longitudinal support to win this vote.
+  const tol=Math.max(2.2,dim*.0022);
+  const sorted=candidates.slice().sort((u,v)=>u.center-v.center);
+  const clusters=[];
+  for(const c of sorted){
+    let best=null,bestDist=Infinity;
+    for(const cl of clusters){
+      const d=Math.abs(c.center-cl.mean);
+      if(d<=tol&&d<bestDist){best=cl;bestDist=d}
+    }
+    if(!best){
+      best={items:[],mean:c.center};clusters.push(best);
+    }
+    best.items.push(c);
+    best.mean=best.items.reduce((sum,x)=>sum+x.center,0)/best.items.length;
+  }
+
+  let winner=null,winnerScore=-Infinity;
+  for(const cl of clusters){
+    const uniqueSamples=new Set(cl.items.map(x=>x.sample)).size;
+    const support=uniqueSamples/sampleCount;
+    const centres=cl.items.map(x=>x.center);
+    const coord=median(centres);
+    const thickness=median(cl.items.map(x=>x.thickness));
+    const dist=Math.abs(coord-originalCoord);
+    const thicknessBonus=Math.min(1,thickness/Math.max(2,dim*.006));
+    const score=support*100 + thicknessBonus*10 - dist*1.35;
+    if(score>winnerScore){
+      winnerScore=score;
+      winner={coord,support,thickness,dist,uniqueSamples};
+    }
+  }
+
+  const minSupport=length<dim*.055?.28:.34;
+  const valid=winner&&winner.support>=minSupport&&winner.dist<=searchRadius;
+  const confidence=valid
+    ? clamp(winner.support*.82 + Math.min(1,winner.thickness/Math.max(2,dim*.008))*.18,0,1)
+    : 0;
+
+  return {
+    orientation,
+    coord:valid?winner.coord:originalCoord,
+    originalCoord,
+    confidence,
+    support:winner?.support||0,
+    thickness:winner?.thickness||0,
+    length,
+    reason:valid?'wall-axis':'low-support'
+  };
+}
+
+function sameAxis(a,b,tol=1.5){
+  return Math.abs(a-b)<=tol;
+}
+
+function flattenDoorNotchesWithWallEvidence(points,imageData,w,h){
+  // Only flatten a small orthogonal excursion when the PNG itself supports a
+  // single wall axis across the complete gap. This is the door-jamb rule.
+  let pts=points.map(p=>({x:p.x,y:p.y}));
+  const dim=Math.min(w,h);
+  const maxDepth=Math.max(9,dim*.026);
+  const maxSpan=Math.max(28,dim*.105);
+  let changed=true,guard=0;
+
+  while(changed&&pts.length>=8&&guard++<30){
+    changed=false;
+    for(let i=0;i<pts.length;i++){
+      const at=k=>pts[(i+k)%pts.length];
+      const a=at(0),b=at(1),c=at(2),d=at(3),e=at(4);
+      const ax=a.x*w,ay=a.y*h,bx=b.x*w,by=b.y*h,cx=c.x*w,cy=c.y*h,dx=d.x*w,dy=d.y*h,ex=e.x*w,ey=e.y*h;
+
+      const hNotch=sameAxis(ay,by)&&sameAxis(bx,cx)&&sameAxis(cy,dy)&&sameAxis(dx,ex)&&sameAxis(ay,ey);
+      const vNotch=sameAxis(ax,bx)&&sameAxis(by,cy)&&sameAxis(cx,dx)&&sameAxis(dy,ey)&&sameAxis(ax,ex);
+      if(!hNotch&&!vNotch)continue;
+
+      const depth=hNotch?Math.abs(cy-ay):Math.abs(cx-ax);
+      const span=hNotch?Math.abs(ex-ax):Math.abs(ey-ay);
+      if(depth>maxDepth||span>maxSpan)continue;
+
+      const fit=fitWallAxisForSegment(imageData,w,h,a,e);
+      if(fit.confidence<.48||fit.support<.43)continue;
+
+      // Remove the three vertices that walk around the jamb/notch.
+      const remove=[];
+      for(let k=1;k<=3;k++)remove.push((i+k)%pts.length);
+      remove.sort((x,y)=>y-x).forEach(idx=>pts.splice(idx,1));
+      changed=true;
+      break;
+    }
+  }
+  return pts;
+}
+
+function polygonSignedAreaNorm(points){
+  let area=0;
+  for(let i=0,j=points.length-1;i<points.length;j=i++){
+    area+=points[j].x*points[i].y-points[i].x*points[j].y;
+  }
+  return area/2;
+}
+
+function reconcileSharedEdgeCoordinates(edges,w,h){
+  const dim=Math.min(w,h);
+  const coordTol=Math.max(1.5,dim*.0018);
+
+  // Shared edges in Topology V4 already use the same source grid. Therefore we only
+  // merge edges whose ORIGINAL axes coincide. We do not merge merely-close parallel walls.
+  const parent=edges.map((_,i)=>i);
+  const find=i=>parent[i]===i?i:(parent[i]=find(parent[i]));
+  const join=(a,b)=>{a=find(a);b=find(b);if(a!==b)parent[b]=a};
+
+  for(let i=0;i<edges.length;i++){
+    const a=edges[i];
+    for(let j=i+1;j<edges.length;j++){
+      const b=edges[j];
+      if(a.orientation!==b.orientation)continue;
+      if(Math.abs(a.originalCoord-b.originalCoord)>coordTol)continue;
+      const overlap=Math.max(0,Math.min(a.spanMax,b.spanMax)-Math.max(a.spanMin,b.spanMin));
+      const minLen=Math.max(1,Math.min(a.spanMax-a.spanMin,b.spanMax-b.spanMin));
+      if(overlap/minLen<.28)continue;
+      join(i,j);
+    }
+  }
+
+  const groups=new Map();
+  edges.forEach((e,i)=>{
+    const root=find(i);
+    const arr=groups.get(root)||[];arr.push(e);groups.set(root,arr);
+  });
+
+  for(const group of groups.values()){
+    const trusted=group.filter(e=>e.confidence>=.34);
+    if(!trusted.length)continue;
+    const weighted=[];
+    trusted.forEach(e=>{
+      const n=clamp(Math.round(e.confidence*10),1,10);
+      for(let k=0;k<n;k++)weighted.push(e.coord);
+    });
+    const canonical=median(weighted);
+    group.forEach(e=>{
+      // A weak edge receives the canonical axis only when another polygon that shares
+      // the exact original boundary found the wall confidently.
+      e.coord=canonical;
+      e.sharedResolved=group.length>1;
+    });
+  }
+}
+
+function alignDetectionsToWallCenters(detections,imageData,w,h){
+  const originalDetections=detections.map(d=>({...d,points:d.points.map(p=>({...p}))}));
+  const working=originalDetections.map(d=>({
+    ...d,
+    points:flattenDoorNotchesWithWallEvidence(d.points,imageData,w,h)
+  }));
+
+  const edges=[];
+  working.forEach((d,di)=>{
+    const pts=d.points;
+    for(let ei=0;ei<pts.length;ei++){
+      const a=pts[ei],b=pts[(ei+1)%pts.length];
+      const fit=fitWallAxisForSegment(imageData,w,h,a,b);
+      const orientation=fit.orientation;
+      const spanA=orientation==='h'?a.x*w:a.y*h;
+      const spanB=orientation==='h'?b.x*w:b.y*h;
+      edges.push({
+        di,ei,orientation,
+        originalCoord:fit.originalCoord,
+        coord:fit.coord,
+        confidence:fit.confidence,
+        support:fit.support,
+        spanMin:Math.min(spanA,spanB),
+        spanMax:Math.max(spanA,spanB),
+        sharedResolved:false
+      });
+    }
+  });
+
+  reconcileSharedEdgeCoordinates(edges,w,h);
+  const byPoly=new Map();
+  edges.forEach(e=>{
+    const arr=byPoly.get(e.di)||[];arr[e.ei]=e;byPoly.set(e.di,arr);
+  });
+
+  let alignedEdges=0,unresolvedEdges=0,sharedEdges=0,totalConfidence=0;
+  const aligned=working.map((d,di)=>{
+    const pts=d.points;
+    const pe=byPoly.get(di)||[];
+    const next=[];
+    const issues=[];
+
+    for(let i=0;i<pts.length;i++){
+      const prev=pe[(i-1+pts.length)%pts.length];
+      const cur=pe[i];
+      const original=pts[i];
+      let x=original.x*w,y=original.y*h;
+
+      if(prev&&cur&&prev.orientation!==cur.orientation){
+        const hEdge=prev.orientation==='h'?prev:cur;
+        const vEdge=prev.orientation==='v'?prev:cur;
+        x=vEdge.coord;y=hEdge.coord;
+      }
+      next.push({x:clamp(x/w,0,1),y:clamp(y/h,0,1)});
+    }
+
+    // Collinear-point removal does not move any boundary and is safe per polygon.
+    const compact=[];
+    for(let i=0;i<next.length;i++){
+      const a=next[(i-1+next.length)%next.length],b=next[i],c=next[(i+1)%next.length];
+      const collinear=(Math.abs(a.x-b.x)<1e-6&&Math.abs(b.x-c.x)<1e-6)||(Math.abs(a.y-b.y)<1e-6&&Math.abs(b.y-c.y)<1e-6);
+      if(!collinear)compact.push(b);
+    }
+
+    // Sanity guard: never replace a detected apartment with a wildly distorted polygon.
+    const oldArea=Math.abs(polygonSignedAreaNorm(d.points));
+    const newArea=Math.abs(polygonSignedAreaNorm(compact));
+    const areaRatio=oldArea?newArea/oldArea:1;
+    const sane=compact.length>=4&&areaRatio>.72&&areaRatio<1.28;
+    const finalPoints=sane?compact:d.points;
+
+    for(const e of pe){
+      if(!e)continue;
+      totalConfidence+=e.confidence;
+      if(e.sharedResolved)sharedEdges++;
+      if(e.confidence>=.34||e.sharedResolved)alignedEdges++;
+      else{
+        unresolvedEdges++;
+        const a=finalPoints[Math.min(e.ei,finalPoints.length-1)];
+        const b=finalPoints[(Math.min(e.ei,finalPoints.length-1)+1)%finalPoints.length];
+        if(a&&b)issues.push({a,b});
+      }
+    }
+
+    return {
+      ...d,
+      points:finalPoints,
+      wallAligned:sane,
+      alignmentIssues:issues
+    };
+  });
+
+  return {
+    detections:aligned,
+    stats:{
+      alignedEdges,
+      unresolvedEdges,
+      sharedEdges,
+      meanConfidence:edges.length?totalConfidence/edges.length:0
+    }
+  };
+}
+
 function topologyGuidedScore(result,seedCount){
   if(!result?.detections?.length)return -1e9;
 
@@ -1319,6 +1665,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
   const [balconySeeds,setBalconySeeds]=useState([]);
   const [seedMode,setSeedMode]=useState('apartments');
   const [rectifyLevel,setRectifyLevel]=useState(2);
+  const [alignmentBase,setAlignmentBase]=useState(null);
   const [aspect,setAspect]=useState(1);
   const [busy,setBusy]=useState(false);
   const [raw,setRaw]=useState(null);
@@ -1364,6 +1711,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
             ? analyzeAuto(loaded.imageData,loaded.w,loaded.h,expected,new Set(),[])
             : analyzePixels(loaded.imageData,loaded.w,loaded.h,Number(threshold)||95,expected,new Set(),[]));
       setExcluded(new Set());
+      setAlignmentBase(null);
       setResult(r);
       if(r?.threshold)setThreshold(r.threshold);
       const m={};
@@ -1383,7 +1731,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
       : (autoThreshold
           ? analyzeAuto(raw.imageData,raw.w,raw.h,expected,nextExcluded,[])
           : analyzePixels(raw.imageData,raw.w,raw.h,Number(threshold)||95,expected,nextExcluded,[]));
-    setExcluded(guided?new Set():nextExcluded);setResult(r);
+    setExcluded(guided?new Set():nextExcluded);setAlignmentBase(null);setResult(r);
     const m={};
     r.detections.forEach((d,i)=>{m[i]=existing[i]?.id||'new'});
     setMapping(m);
@@ -1398,6 +1746,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
       const r=autoThreshold
         ? analyzeGuidedAuto(raw.imageData,raw.w,raw.h,seeds,commonSeeds,balconySeeds,lvl)
         : analyzeGuidedTopology(raw.imageData,raw.w,raw.h,Number(threshold)||105,seeds,commonSeeds,balconySeeds,lvl);
+      setAlignmentBase(null);
       setResult(r);
       const m={};
       r.detections.forEach((d,i)=>{m[i]=existing[i]?.id||'new'});
@@ -1408,6 +1757,38 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     }finally{
       setBusy(false);
     }
+  }
+
+  function alignToWallCenters(){
+    if(!result?.detections?.length||!raw)return;
+    setBusy(true);setMessage('');
+    try{
+      const base=alignmentBase||{
+        ...result,
+        detections:result.detections.map(d=>({...d,points:d.points.map(p=>({...p}))}))
+      };
+      if(!alignmentBase)setAlignmentBase(base);
+
+      const aligned=alignDetectionsToWallCenters(result.detections,raw.imageData,raw.w,raw.h);
+      setResult({
+        ...result,
+        detections:aligned.detections,
+        wallAligned:true,
+        wallAlignment:aligned.stats
+      });
+      setMessage(`✓ Aliniere pe axul pereților: ${aligned.stats.alignedEdges} laturi aliniate · ${aligned.stats.sharedEdges} limite comune sincronizate · ${aligned.stats.unresolvedEdges} laturi păstrate pentru verificare.`);
+    }catch(e){
+      setMessage(`Alinierea pe pereți a eșuat: ${e.message}`);
+    }finally{
+      setBusy(false);
+    }
+  }
+
+  function restoreDetectedGeometry(){
+    if(!alignmentBase)return;
+    setResult(alignmentBase);
+    setAlignmentBase(null);
+    setMessage('✓ Am revenit la geometria detectată înainte de alinierea pe pereți.');
   }
 
   function markCommon(componentId){
@@ -1458,6 +1839,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         return [...v,{x,y}];
       });
     }
+    setAlignmentBase(null);
     setResult(null);
   }
 
@@ -1495,7 +1877,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     <div className="modal-card auto-detector-card">
       <button className="x" onClick={onClose}>×</button>
       <div className="auto-head">
-        <div><small>PNG TOPOLOGY · V4.1</small><h2>Detectează apartamentele</h2><p>Workflow-ul cu Apartamente + Zonă comună + Balcoane/terase rămâne complet. În plus, poligoanele se rectifică pe o grilă comună înainte de vectorizare: doar 90°, fără contur după uși și fără simplificări independente între vecini.</p></div>
+        <div><small>PNG TOPOLOGY · V4.2</small><h2>Detectează apartamentele</h2><p>Maparea Topology rămâne neschimbată. După detecție ai un pas separat „Aliniază pe centrul pereților”: măsoară PNG-ul original pe toată lungimea fiecărei laturi, continuă axul peste golurile de uși și sincronizează limitele comune.</p></div>
       </div>
 
       <div className="detector-settings detector-settings-v2">
@@ -1609,12 +1991,28 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         <div className="detector-summary">
           <b>{result.detections.length} apartamente propuse</b>
           <span>{coreText}</span>
-          <small>{result.topologyGuided?'PNG Topology V4.1':'Architectural V2'} · {result.width}×{result.height}px analiză · prag {result.threshold}{guided?` · ${seeds.length} apartamente · ${commonSeeds.length} puncte comune · ${balconySeeds.length} balcoane marcate`:''}{result.topologyGuided?` · ${result.balconyRescued||0} recuperate automat · rectificare ${result.rectificationLevel||rectifyLevel}/3`:''}</small>
+          <small>{result.topologyGuided?'PNG Topology V4.2':'Architectural V2'} · {result.width}×{result.height}px analiză · prag {result.threshold}{guided?` · ${seeds.length} apartamente · ${commonSeeds.length} puncte comune · ${balconySeeds.length} balcoane marcate`:''}{result.topologyGuided?` · ${result.balconyRescued||0} recuperate automat · rectificare ${result.rectificationLevel||rectifyLevel}/3`:''}{result.wallAlignment?` · ax pereți ${result.wallAlignment.alignedEdges} ok / ${result.wallAlignment.unresolvedEdges} verificare`:''}</small>
           <small>{guided
             ? 'Dacă o limită intră în hol, mută sau mai adaugă un punct C în acea ramură a zonei comune și regenerează.'
             : 'Poți marca o propunere drept „zonă comună” și detectorul recalculează limitele.'
           }</small>
         </div>
+
+        {guided&&<div className="wall-align-panel">
+          <div className="wall-align-copy">
+            <b>Aliniază pe centrul pereților</b>
+            <span>Nu redetectează apartamentele. Folosește PNG-ul original, măsoară aceeași latură în mai multe puncte, ignoră detaliile locale și continuă axul peste golurile de uși.</span>
+            {result.wallAlignment&&<small>
+              {result.wallAlignment.alignedEdges} laturi aliniate · {result.wallAlignment.sharedEdges} limite comune · {result.wallAlignment.unresolvedEdges} laturi nemutate (nesigure)
+            </small>}
+          </div>
+          <div className="wall-align-actions">
+            {alignmentBase&&<button disabled={busy} onClick={restoreDetectedGeometry}>Revino la contur detectat</button>}
+            <button className="primary" disabled={busy||!raw} onClick={alignToWallCenters}>
+              {busy?'Aliniez…':'Aliniază pe centrul pereților'}
+            </button>
+          </div>
+        </div>}
 
         {guided&&<div className="rectify-panel">
           <div className="rectify-copy">
@@ -1643,6 +2041,12 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
               points={d.points.map(p=>`${p.x*1000},${p.y*1000}`).join(' ')}
               style={{fill:colors[i%colors.length]+'66',stroke:colors[i%colors.length]}}
             />)}
+            {result.detections.flatMap((d,di)=>(d.alignmentIssues||[]).map((seg,si)=><line
+              key={`align-issue-${di}-${si}`}
+              x1={seg.a.x*1000} y1={seg.a.y*1000}
+              x2={seg.b.x*1000} y2={seg.b.y*1000}
+              className="wall-align-issue"
+            />))}
             {seeds.map((p,i)=><g key={'seed'+i}><circle cx={p.x*1000} cy={p.y*1000} r="10" className="seed-dot"/><text x={p.x*1000+14} y={p.y*1000-14} className="seed-label">{i+1}</text></g>)}
             {commonSeeds.map((p,i)=><g key={'common'+i}><circle cx={p.x*1000} cy={p.y*1000} r="11" className="common-seed-dot"/><text x={p.x*1000+14} y={p.y*1000-14} className="common-seed-label">C{i+1}</text></g>)}
             {balconySeeds.map((p,i)=><g key={'balcony'+i}><circle cx={p.x*1000} cy={p.y*1000} r="10" className="balcony-seed-dot"/><text x={p.x*1000+14} y={p.y*1000-14} className="balcony-seed-label">B{i+1}→{p.apartmentIndex+1}</text></g>)}

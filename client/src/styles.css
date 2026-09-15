@@ -434,3 +434,41 @@ a.primary:hover,
   color:#fff;
   border-color:#101512;
 }
+
+
+/* 04.4.5 — wall-centre alignment post-process */
+.wall-align-panel{
+  display:flex;
+  gap:14px;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  padding:13px 14px;
+  margin:10px 0;
+  border:1px solid rgba(21,112,73,.26);
+  border-radius:12px;
+  background:rgba(234,248,240,.88);
+}
+.wall-align-copy{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  flex:1 1 430px;
+}
+.wall-align-copy span,.wall-align-copy small{
+  font-size:12px;
+  line-height:1.4;
+  opacity:.74;
+}
+.wall-align-actions{
+  display:flex;
+  gap:7px;
+  flex-wrap:wrap;
+}
+.detector-preview .wall-align-issue{
+  stroke:#ff7a00;
+  stroke-width:4;
+  stroke-dasharray:10 7;
+  vector-effect:non-scaling-stroke;
+  pointer-events:none;
+}

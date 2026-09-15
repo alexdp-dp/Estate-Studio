@@ -1,3 +1,30 @@
+# Estate Studio — Build 04.4.5 Wall Center Alignment
+
+Build cumulativ peste **04.4.4 Rectified Topology**. Detectorul de apartamente NU este înlocuit.
+
+## Nou: `Aliniază pe centrul pereților`
+După ce Topology a identificat apartamentele, rulează un post-proces separat pe PNG-ul original:
+
+- fiecare latură este măsurată în mai multe secțiuni pe toată lungimea ei;
+- se caută banda peretelui și se folosește centrul dintre marginile benzii;
+- nu se alege pur și simplu cea mai apropiată linie neagră; candidații trebuie să fie consistenți longitudinal;
+- mobilierul, arcele de ușă și simbolurile locale nu au suficient suport pe lungime și sunt respinse;
+- două stroke-uri paralele apropiate pot fi tratate ca marginile aceleiași benzi / parapet;
+- micile ocoluri de toc de ușă sunt eliminate numai dacă PNG-ul confirmă aceeași axă înainte și după gol;
+- limitele comune care proveneau deja din aceeași frontieră Topology primesc o singură coordonată canonică;
+- o latură cu încredere mică NU este mutată și apare punctat portocaliu pentru verificare;
+- există `Revino la contur detectat` înainte de salvare.
+
+## Workflow păstrat
+- Apartamente
+- Zonă comună
+- Balcoane / terase
+- Curat / Agresiv / Foarte agresiv
+- Rectifică poligoanele
+- editorul manual stabil
+
+`/api/version` => `04.4.5-wall-center-alignment`
+
 # Estate Studio — Build 04.4.4 Rectified Topology
 
 IMPORTANT: acest build este făcut cumulativ peste **04.4.2 Balcony Seeds**.
