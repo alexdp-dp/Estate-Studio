@@ -1,18 +1,127 @@
-# Estate Studio — Build 04.4.3 Orthogonal Balconies
+# Estate Studio — Build 04.4.4 Rectified Topology
 
-Update concentrat strict pe detectorul PNG asistat, pentru planuri ca în exemplul tău.
+IMPORTANT: acest build este făcut cumulativ peste **04.4.2 Balcony Seeds**.
+04.4.3 a fost bazat accidental pe 04.4.0 și pierdea UI-ul introdus în 04.4.2.
+04.4.4 corectează explicit acea regresie.
 
-## Ce schimbă
-- contururile finale sunt **strict ortogonale** (doar linii orizontale / verticale);
-- sunt eliminate **spike-urile** și micile retrageri produse de uși sau zgomot raster;
-- muchiile scurte sunt simplificate mai agresiv, ca poligoanele să arate mai aproape de un plan comercial decât de un tracing pixel-cu-pixel;
-- buzunarele etichetate ca exterior dar **închise în interiorul planului** sunt reasignate la apartamentul vecin dominant — util în special pentru **balcoane / terase**;
-- rezultatul rămâne tangent între unități, fără diagonale deliberate.
+## UI care trebuie să existe
+În Mod asistat:
+- `Apartamente`
+- `Zonă comună`
+- `Balcoane / terase`
 
-## Observație
-Acest build este în continuare pe **workflow PNG**. Nu mai conține nimic din ramura DWG/DXF/CAD.
+După generare apare și panoul:
+- `Curat`
+- `Agresiv`
+- `Foarte agresiv`
+- `Rectifică poligoanele`
 
-`/api/version` => `04.4.3-orthogonal-balconies`
+## Rectificare geometrică
+Rectificarea se face pe **harta comună de etichete**, înainte de vectorizare:
+- numai muchii orizontale / verticale;
+- nu urmărește arcul sau golul ușii;
+- elimină run-uri scurte / notch-uri produse de uși, nișe și zgomot;
+- coarse-grid mai puternic pe nivelurile 2 și 3;
+- vecinii rămân tangențiali pentru că ambele apartamente folosesc aceeași frontieră comună;
+- nu se mai face spike cleanup independent pe fiecare apartament.
+
+## Balcoane
+Tot ce exista în 04.4.2 rămâne:
+- recuperare automată de balcon/terasă;
+- fallback manual `Balcoane / terase`;
+- click-ul de balcon devine seed suplimentar pentru același apartament, nu apartament separat.
+
+`/api/version` => `04.4.4-rectified-topology`
+
+# Estate Studio — Build 04.4.2 Balcony Seeds
+
+Update peste 04.4.1 pentru cazul în care un balcon/terasă este desenat astfel încât
+detectorul îl atribuie exteriorului.
+
+## De ce 04.4.1 putea rata balconul
+Pe unele planuri:
+- fațada / tâmplăria dintre cameră și balcon este suficient de puternică încât seed-ul
+  apartamentului nu ajunge în balcon;
+- balustrada/conturul exterior este suficient de subțire încât exteriorul ajunge primul;
+- din imagine singură nu există întotdeauna o regulă sigură care să spună că acel buzunar
+  exterior este balcon și nu spațiu exterior real.
+
+## Soluție V3.2
+Modul asistat are acum 3 tipuri de puncte:
+
+1. `Apartamente`
+2. `Zonă comună`
+3. `Balcoane / terase`
+
+Un punct de balcon:
+- NU creează un apartament nou;
+- este legat automat de cel mai apropiat seed de apartament;
+- intră în algoritm cu ACELAȘI label ca apartamentul;
+- devine un al doilea punct de propagare pentru același poligon.
+
+Exemplu:
+`B2→5` = al doilea balcon marcat, atribuit apartamentului 5.
+
+## Rezultatul final
+Rămân toate regulile din 04.4.1:
+- numai muchii la 90°;
+- fără diagonale;
+- fără contur după arcul ușii;
+- grilă comună pentru toate apartamentele;
+- vecini tangențiali;
+- fără overlap produs de simplificări independente;
+- spike cleanup.
+
+Balcony seed este doar fallback. Recuperarea automată din 04.4.1 rămâne activă.
+
+`/api/version` => `04.4.2-balcony-seeds`
+
+# Estate Studio — Build 04.4.1 Balcony + Orthogonal + Tangent
+
+Update peste 04.4.0, concentrat strict pe cele trei probleme observate în planul real.
+
+## 1. Balcoane / terase
+În 04.4.0 exteriorul concura cu apartamentele și putea intra prin golurile fine ale
+balustradelor/fațadei, câștigând balconul.
+
+În 04.4.1:
+- construim separat un `enclosure mask`;
+- închidem doar pentru analiza exteriorului golurile fine din fațadă/balustradă;
+- detectăm buzunarele care erau marcate `exterior`, dar devin spații închise;
+- dacă un astfel de buzunar are un singur apartament vecin dominant și nu aparține
+  holului comun, este atașat acelui apartament;
+- ușile rămân deschise în segmentarea principală.
+
+## 2. Doar linii la 90°
+Pentru Topology Guided nu mai folosim `architecturalPolygonize` / RDP / angle snapping.
+
+Poligonul final este extras direct dintr-o grilă de etichete comună:
+- toate segmentele sunt strict orizontale sau verticale;
+- nu există muchii diagonale;
+- nu mai urmărește arcul ușii;
+- eliminăm punctele coliniare;
+- eliminăm excursiile/spike-urile dreptunghiulare foarte scurte.
+
+## 3. Apartamente tangențiale, fără overlap
+Toate apartamentele sunt generate din aceeași partiție raster și din aceeași grilă
+regularizată.
+
+Asta înseamnă:
+- un perete comun are o singură poziție geometrică;
+- poligonul A și poligonul B folosesc exact aceeași limită comună;
+- nu mai simplificăm fiecare apartament independent;
+- nu ar trebui să apară suprapuneri sau fante între vecini.
+
+## Regularizare
+Înainte de vectorizare:
+- etichetele sunt agregate pe o grilă comună;
+- se face majority smoothing conservator;
+- apoi se extrage conturul ortogonal.
+
+## UI
+Rezumatul detectorului arată și câte balcoane/terase au fost recuperate automat.
+
+`/api/version` => `04.4.1-balcony-orthogonal-tangent`
 
 # Estate Studio — Build 04.4.0 PNG Topology Guided
 

@@ -378,3 +378,59 @@ a.primary:hover,
   stroke:#fff;
   stroke-width:7px;
 }
+
+
+/* 04.4.2 — assisted balcony / terrace seeds */
+.seed-mode-switch button.active.balcony{
+  background:#1479a6;
+  border-color:#1479a6;
+}
+.detector-preview .balcony-seed-dot{
+  fill:#1479a6;
+  stroke:#fff;
+  stroke-width:4;
+  vector-effect:non-scaling-stroke;
+}
+.detector-preview .balcony-seed-label{
+  fill:#1479a6;
+  font-size:25px;
+  font-weight:900;
+  paint-order:stroke;
+  stroke:#fff;
+  stroke-width:7px;
+}
+
+
+/* 04.4.4 — global orthogonal rectification controls */
+.rectify-panel{
+  display:flex;
+  gap:12px;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  padding:12px 14px;
+  margin:10px 0;
+  border:1px solid rgba(0,0,0,.12);
+  border-radius:12px;
+  background:rgba(255,255,255,.92);
+}
+.rectify-copy{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  flex:1 1 330px;
+}
+.rectify-copy span{
+  font-size:12px;
+  opacity:.72;
+}
+.rectify-levels{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+}
+.rectify-levels button.active{
+  background:#101512;
+  color:#fff;
+  border-color:#101512;
+}
