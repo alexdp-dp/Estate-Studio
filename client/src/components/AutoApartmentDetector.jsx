@@ -470,6 +470,204 @@ function buildGuidedWallMask(dark,w,h){
   return morphDilatePasses(morphErode(morphDilate(wall,w,h),w,h),w,h,1);
 }
 
+
+function buildSemanticWallMask(dark,w,h){
+  const base=Math.min(w,h);
+
+  // Pass 1 — thickness. One erosion kills most text, furniture outlines,
+  // door arcs and thin sanitary symbols while real walls survive.
+  let thick=morphErodePasses(dark,w,h,1);
+  thick=morphDilatePasses(thick,w,h,2);
+
+  // Pass 2 — long axial strokes. Keep façade / balcony / partition lines only
+  // when they are close to a real thick-wall network. This prevents long bed,
+  // table or annotation strokes from becoming apartment boundaries.
+  const minRun=Math.max(10,Math.round(base*.020));
+  const long=keepLongRuns(dark,w,h,minRun);
+  const nearThick=morphDilatePasses(thick,w,h,Math.min(5,Math.max(3,Math.round(base*.003))));
+
+  // Exception for extremely long envelope strokes, but still require them to
+  // live reasonably close to the wall network.
+  const veryLong=keepLongRuns(dark,w,h,Math.max(28,Math.round(base*.070)));
+  const envelopeReach=morphDilatePasses(thick,w,h,Math.min(8,Math.max(5,Math.round(base*.005))));
+
+  const wall=new Uint8Array(dark.length);
+  for(let i=0;i<wall.length;i++){
+    wall[i]=(thick[i] || (long[i]&&nearThick[i]) || (veryLong[i]&&envelopeReach[i]))?1:0;
+  }
+
+  // Only seal antialias pinholes. Real door openings are kept open here;
+  // they are closed separately only for room-graph construction.
+  let cleaned=morphDilate(wall,w,h);
+  cleaned=morphErode(cleaned,w,h);
+  return morphDilatePasses(cleaned,w,h,1);
+}
+
+function nearestComponentId(componentLabels,w,h,nx,ny,maxRadius=30){
+  const x=clamp(Math.round(nx*(w-1)),0,w-1);
+  const y=clamp(Math.round(ny*(h-1)),0,h-1);
+  const direct=componentLabels[y*w+x];
+  if(direct)return direct;
+
+  for(let r=1;r<=maxRadius;r++){
+    const x0=Math.max(0,x-r),x1=Math.min(w-1,x+r);
+    const y0=Math.max(0,y-r),y1=Math.min(h-1,y+r);
+    for(let xx=x0;xx<=x1;xx++){
+      let id=componentLabels[y0*w+xx]; if(id)return id;
+      id=componentLabels[y1*w+xx]; if(id)return id;
+    }
+    for(let yy=y0+1;yy<y1;yy++){
+      let id=componentLabels[yy*w+x0]; if(id)return id;
+      id=componentLabels[yy*w+x1]; if(id)return id;
+    }
+  }
+  return 0;
+}
+
+function buildRoomDoorGraph(opaque,wall,w,h){
+  const base=Math.min(w,h);
+
+  // This mask is ONLY for discovering rooms. We intentionally bridge doorway-
+  // sized axial gaps here. The final polygon is still generated against the
+  // original semantic wall mask, so the artificial bridge never becomes a wall.
+  const doorClosed=bridgeAxisGaps(
+    wall,w,h,
+    Math.max(18,Math.round(base*.040)),
+    Math.max(7,Math.round(base*.010))
+  );
+
+  const roomFree=new Uint8Array(w*h);
+  const bridgePixels=new Uint8Array(w*h);
+  for(let i=0;i<roomFree.length;i++){
+    roomFree[i]=opaque[i]&&!doorClosed[i]?1:0;
+    bridgePixels[i]=doorClosed[i]&&!wall[i]?1:0;
+  }
+
+  const rooms=components(roomFree,w,h,false);
+  const bridgeCC=components(bridgePixels,w,h,true);
+  const adjacency=new Map();
+  const edgeKeys=new Set();
+  let doorLinks=0;
+
+  const addEdge=(a,b)=>{
+    if(!a||!b||a===b)return;
+    const lo=Math.min(a,b),hi=Math.max(a,b),k=`${lo}:${hi}`;
+    if(edgeKeys.has(k))return;
+    edgeKeys.add(k);doorLinks++;
+    if(!adjacency.has(a))adjacency.set(a,new Set());
+    if(!adjacency.has(b))adjacency.set(b,new Set());
+    adjacency.get(a).add(b);adjacency.get(b).add(a);
+  };
+
+  // Each connected bridge cluster represents one candidate doorway/gap.
+  // Look just around that bridge and connect the room components on its sides.
+  for(const st of bridgeCC.stats){
+    if(st.area<2)continue;
+    const ids=new Map();
+    const pad=Math.max(3,Math.round(base*.004));
+    const x0=Math.max(0,st.minX-pad),x1=Math.min(w-1,st.maxX+pad);
+    const y0=Math.max(0,st.minY-pad),y1=Math.min(h-1,st.maxY+pad);
+    for(let y=y0;y<=y1;y++){
+      for(let x=x0;x<=x1;x++){
+        const id=rooms.labels[y*w+x];
+        if(id)ids.set(id,(ids.get(id)||0)+1);
+      }
+    }
+    const ranked=[...ids.entries()].sort((a,b)=>b[1]-a[1]).slice(0,3).map(x=>x[0]);
+    if(ranked.length>=2){
+      addEdge(ranked[0],ranked[1]);
+      if(ranked.length===3 && ids.get(ranked[2])>=Math.max(4,(ids.get(ranked[1])||0)*.65))addEdge(ranked[0],ranked[2]);
+    }
+  }
+
+  return {rooms,adjacency,doorClosed,bridgePixels,doorLinks};
+}
+
+function assignRoomGraphLabels(graph,w,h,apartmentSeeds,commonSeeds,balconySeeds=[]){
+  const {rooms,adjacency}=graph;
+  const maxRoomId=rooms.stats.length;
+  const roomLabels=new Int16Array(maxRoomId+1);
+  const distance=new Int16Array(maxRoomId+1); distance.fill(32767);
+  const queue=[];
+  let sourceConflicts=0;
+
+  const pushSource=(roomId,label)=>{
+    if(!roomId)return;
+    if(distance[roomId]===0){
+      // If a balcony seed lands in the same room as its apartment seed, same label is fine.
+      if(roomLabels[roomId]===label)return;
+      // Prefer an explicit apartment/common source over exterior; conflicting
+      // apartment/common sources signal that room segmentation is too weak.
+      if(roomLabels[roomId]===-2){roomLabels[roomId]=label;return}
+      sourceConflicts++;
+      return;
+    }
+    distance[roomId]=0;roomLabels[roomId]=label;queue.push(roomId);
+  };
+
+  apartmentSeeds.forEach((p,i)=>pushSource(nearestComponentId(rooms.labels,w,h,p.x,p.y),i+1));
+  commonSeeds.forEach(p=>pushSource(nearestComponentId(rooms.labels,w,h,p.x,p.y),-1));
+  balconySeeds.forEach(p=>{
+    const label=Math.max(1,Math.min(apartmentSeeds.length,Number(p.apartmentIndex)+1));
+    pushSource(nearestComponentId(rooms.labels,w,h,p.x,p.y),label);
+  });
+
+  // Border-touching room components are exterior sources, unless the user
+  // explicitly placed another seed in the same component.
+  for(const st of rooms.stats){
+    if(st.touchesBorder && distance[st.id]!==0)pushSource(st.id,-2);
+  }
+
+  let head=0;
+  while(head<queue.length){
+    const roomId=queue[head++];
+    const label=roomLabels[roomId],dist=distance[roomId];
+    for(const nb of (adjacency.get(roomId)||[])){
+      const nd=dist+1;
+      if(nd<distance[nb]){
+        distance[nb]=nd;roomLabels[nb]=label;queue.push(nb);
+      }else if(nd===distance[nb] && roomLabels[nb]!==label){
+        // Ties at an entrance should favour the private apartment rather than
+        // allowing the common/exterior source to eat a bedroom behind that door.
+        if(label>0 && roomLabels[nb]<=0)roomLabels[nb]=label;
+      }
+    }
+  }
+
+  // Paint assigned room cells. Unassigned components remain 0 and are filled
+  // only inside narrow real door openings by the next pass.
+  const seeded=new Int16Array(w*h);
+  for(let i=0;i<seeded.length;i++){
+    const rid=rooms.labels[i];
+    if(rid)seeded[i]=roomLabels[rid]||0;
+  }
+  return {seeded,roomLabels,sourceConflicts};
+}
+
+function fillOnlyUnassignedFree(seeded,free,w,h){
+  const out=new Int16Array(seeded);
+  const N=w*h,queue=new Int32Array(N);
+  let head=0,tail=0;
+  for(let i=0;i<N;i++)if(out[i]!==0){queue[tail++]=i}
+
+  while(head<tail){
+    const i=queue[head++],label=out[i];
+    const y=Math.floor(i/w),x=i-y*w;
+    if(y>0){const n=i-w;if(free[n]&&out[n]===0){out[n]=label;queue[tail++]=n}}
+    if(x>0){const n=i-1;if(free[n]&&out[n]===0){out[n]=label;queue[tail++]=n}}
+    if(x<w-1){const n=i+1;if(free[n]&&out[n]===0){out[n]=label;queue[tail++]=n}}
+    if(y<h-1){const n=i+w;if(free[n]&&out[n]===0){out[n]=label;queue[tail++]=n}}
+  }
+  return out;
+}
+
+function hasAllGuidedSources(labelMap,apartmentCount){
+  const seen=new Set();
+  for(let i=0;i<labelMap.length;i++)if(labelMap[i]>0)seen.add(labelMap[i]);
+  for(let label=1;label<=apartmentCount;label++)if(!seen.has(label))return false;
+  return true;
+}
+
 function nearestFreePoint(free,w,h,nx,ny,maxRadius=20){
   const x=clamp(Math.round(nx*(w-1)),0,w-1);
   const y=clamp(Math.round(ny*(h-1)),0,h-1);
@@ -1006,7 +1204,7 @@ function analyzeGuidedTopology(imageData,w,h,threshold,apartmentSeeds,commonSeed
     if(gray<threshold)dark[i]=1;
   }
 
-  const wall=buildGuidedWallMask(dark,w,h);
+  const wall=buildSemanticWallMask(dark,w,h);
   const free=new Uint8Array(N);
   let wallPixels=0;
   for(let i=0;i<N;i++){
@@ -1014,15 +1212,36 @@ function analyzeGuidedTopology(imageData,w,h,threshold,apartmentSeeds,commonSeed
     free[i]=opaque[i]&&!wall[i]?1:0;
   }
 
-  const rawFreeLabels=fillGuidedFreeSpace(
-    free,w,h,
+  // WALL-FIRST / ROOM-GRAPH V5.
+  // 1) close doorway-sized wall gaps only in a temporary mask;
+  // 2) extract room components;
+  // 3) reconnect rooms through the detected doorway bridges;
+  // 4) propagate apartment/common seeds on that graph, not blindly through pixels.
+  const roomGraph=buildRoomDoorGraph(opaque,wall,w,h);
+  const graphAssigned=assignRoomGraphLabels(
+    roomGraph,w,h,
     apartmentSeeds||[],
     commonSeeds||[],
     balconySeeds||[]
   );
+  let rawFreeLabels=fillOnlyUnassignedFree(graphAssigned.seeded,free,w,h);
 
-  // Rescue balconies/terraces that were won by the exterior seed through thin
-  // façade/railing gaps, then split wall thickness between neighbouring regions.
+  // Safety fallback: if the temporary room segmentation was too aggressive and
+  // lost an apartment seed, keep the proven geodesic topology rather than returning
+  // an incomplete floor.
+  let graphFallback=false;
+  if(graphAssigned.sourceConflicts>0 || !hasAllGuidedSources(rawFreeLabels,(apartmentSeeds||[]).length)){
+    graphFallback=true;
+    rawFreeLabels=fillGuidedFreeSpace(
+      free,w,h,
+      apartmentSeeds||[],
+      commonSeeds||[],
+      balconySeeds||[]
+    );
+  }
+
+  // Balconies/terraces remain a dedicated post-pass. This handles thin railing /
+  // façade cases after the room graph has already removed furniture influence.
   const balconyRescue=rescueBalconyAndTerracePockets(
     rawFreeLabels,
     opaque,
@@ -1040,7 +1259,7 @@ function analyzeGuidedTopology(imageData,w,h,threshold,apartmentSeeds,commonSeed
   // This guarantees that two neighbouring apartments use exactly the same
   // boundary coordinates instead of independently simplified contours.
   const rectification=clamp(Number(rectifyLevel)||2,1,3);
-  const blockFactor=rectification===1?.0032:rectification===2?.0055:.0080;
+  const blockFactor=rectification===1?.0024:rectification===2?.0034:.0048;
   const blockSize=Math.max(3,Math.round(Math.min(w,h)*blockFactor));
   const shared=blockifySharedLabels(finalLabels,w,h,blockSize,rectification);
 
@@ -1106,10 +1325,16 @@ function analyzeGuidedTopology(imageData,w,h,threshold,apartmentSeeds,commonSeed
     balconySeedCount:(balconySeeds||[]).length,
     sharedGridBlock:blockSize,
     rectificationLevel:rectification,
+    roomCount:roomGraph.rooms.stats.length,
+    doorLinks:roomGraph.doorLinks,
+    roomGraphFallback:graphFallback,
+    roomGraphConflicts:graphAssigned.sourceConflicts,
+    wallEngine:'semantic-v5',
     width:w,
     height:h,
     topologyGuided:true,
-    orthogonalShared:true
+    orthogonalShared:true,
+    roomGraph:true
   };
 }
 
@@ -1495,7 +1720,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     <div className="modal-card auto-detector-card">
       <button className="x" onClick={onClose}>×</button>
       <div className="auto-head">
-        <div><small>PNG TOPOLOGY · V4.1</small><h2>Detectează apartamentele</h2><p>Workflow-ul cu Apartamente + Zonă comună + Balcoane/terase rămâne complet. În plus, poligoanele se rectifică pe o grilă comună înainte de vectorizare: doar 90°, fără contur după uși și fără simplificări independente între vecini.</p></div>
+        <div><small>WALL-FIRST · ROOM GRAPH · V5</small><h2>Detectează apartamentele</h2><p>Motorul separă mai întâi pereții reali de mobilier/simboluri, închide temporar golurile de ușă ca să identifice încăperile și propagă apartamentele pe un graf de camere. Conturul final rămâne comun, ortogonal și tangent.</p></div>
       </div>
 
       <div className="detector-settings detector-settings-v2">
@@ -1529,7 +1754,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
 
       {guided&&<div className="guided-help topology-guided-help">
         <b>Mod asistat Topology:</b>
-        <span>1) pune câte un punct în fiecare apartament; 2) marchează holul comun; 3) opțional, dacă un balcon/terasă nu intră automat în poligon, selectează „Balcoane / terase” și dă un click în el. Va fi atașat automat apartamentului cel mai apropiat.</span>
+        <span>1) pune câte un punct în fiecare apartament; 2) marchează holul comun; 3) balcoanele rămân opționale. V5 extrage întâi pereții și camerele, apoi unește camerele prin golurile de ușă — mobilierul și simbolurile nu mai trebuie să dicteze conturul.</span>
         <div className="seed-mode-switch">
           <button className={seedMode==='apartments'?'active':''} onClick={()=>setSeedMode('apartments')}>Apartamente</button>
           <button className={seedMode==='common'?'active common':''} onClick={()=>setSeedMode('common')}>Zonă comună</button>
@@ -1609,7 +1834,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         <div className="detector-summary">
           <b>{result.detections.length} apartamente propuse</b>
           <span>{coreText}</span>
-          <small>{result.topologyGuided?'PNG Topology V4.1':'Architectural V2'} · {result.width}×{result.height}px analiză · prag {result.threshold}{guided?` · ${seeds.length} apartamente · ${commonSeeds.length} puncte comune · ${balconySeeds.length} balcoane marcate`:''}{result.topologyGuided?` · ${result.balconyRescued||0} recuperate automat · rectificare ${result.rectificationLevel||rectifyLevel}/3`:''}</small>
+          <small>{result.roomGraph?'Wall-first Room Graph V5':result.topologyGuided?'PNG Topology V4.1':'Architectural V2'} · {result.width}×{result.height}px · prag {result.threshold}{guided?` · ${seeds.length} apartamente · ${commonSeeds.length} puncte comune · ${balconySeeds.length} balcoane`:''}{result.roomGraph?` · ${result.roomCount||0} încăperi · ${result.doorLinks||0} legături ușă${result.roomGraphFallback?' · fallback topology':''}`:''}{result.topologyGuided?` · rectificare ${result.rectificationLevel||rectifyLevel}/3`:''}</small>
           <small>{guided
             ? 'Dacă o limită intră în hol, mută sau mai adaugă un punct C în acea ramură a zonei comune și regenerează.'
             : 'Poți marca o propunere drept „zonă comună” și detectorul recalculează limitele.'
