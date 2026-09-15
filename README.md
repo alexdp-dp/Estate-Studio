@@ -1,49 +1,18 @@
-# Estate Studio — Build 04.4.1 Balcony + Orthogonal + Tangent
+# Estate Studio — Build 04.4.3 Orthogonal Balconies
 
-Update peste 04.4.0, concentrat strict pe cele trei probleme observate în planul real.
+Update concentrat strict pe detectorul PNG asistat, pentru planuri ca în exemplul tău.
 
-## 1. Balcoane / terase
-În 04.4.0 exteriorul concura cu apartamentele și putea intra prin golurile fine ale
-balustradelor/fațadei, câștigând balconul.
+## Ce schimbă
+- contururile finale sunt **strict ortogonale** (doar linii orizontale / verticale);
+- sunt eliminate **spike-urile** și micile retrageri produse de uși sau zgomot raster;
+- muchiile scurte sunt simplificate mai agresiv, ca poligoanele să arate mai aproape de un plan comercial decât de un tracing pixel-cu-pixel;
+- buzunarele etichetate ca exterior dar **închise în interiorul planului** sunt reasignate la apartamentul vecin dominant — util în special pentru **balcoane / terase**;
+- rezultatul rămâne tangent între unități, fără diagonale deliberate.
 
-În 04.4.1:
-- construim separat un `enclosure mask`;
-- închidem doar pentru analiza exteriorului golurile fine din fațadă/balustradă;
-- detectăm buzunarele care erau marcate `exterior`, dar devin spații închise;
-- dacă un astfel de buzunar are un singur apartament vecin dominant și nu aparține
-  holului comun, este atașat acelui apartament;
-- ușile rămân deschise în segmentarea principală.
+## Observație
+Acest build este în continuare pe **workflow PNG**. Nu mai conține nimic din ramura DWG/DXF/CAD.
 
-## 2. Doar linii la 90°
-Pentru Topology Guided nu mai folosim `architecturalPolygonize` / RDP / angle snapping.
-
-Poligonul final este extras direct dintr-o grilă de etichete comună:
-- toate segmentele sunt strict orizontale sau verticale;
-- nu există muchii diagonale;
-- nu mai urmărește arcul ușii;
-- eliminăm punctele coliniare;
-- eliminăm excursiile/spike-urile dreptunghiulare foarte scurte.
-
-## 3. Apartamente tangențiale, fără overlap
-Toate apartamentele sunt generate din aceeași partiție raster și din aceeași grilă
-regularizată.
-
-Asta înseamnă:
-- un perete comun are o singură poziție geometrică;
-- poligonul A și poligonul B folosesc exact aceeași limită comună;
-- nu mai simplificăm fiecare apartament independent;
-- nu ar trebui să apară suprapuneri sau fante între vecini.
-
-## Regularizare
-Înainte de vectorizare:
-- etichetele sunt agregate pe o grilă comună;
-- se face majority smoothing conservator;
-- apoi se extrage conturul ortogonal.
-
-## UI
-Rezumatul detectorului arată și câte balcoane/terase au fost recuperate automat.
-
-`/api/version` => `04.4.1-balcony-orthogonal-tangent`
+`/api/version` => `04.4.3-orthogonal-balconies`
 
 # Estate Studio — Build 04.4.0 PNG Topology Guided
 

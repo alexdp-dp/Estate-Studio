@@ -269,50 +269,20 @@ function simplifyClosed(loop,eps=2.2){
 }
 
 
-function angleDiffPi(a,b){
-  let d=Math.abs(a-b)%Math.PI;
-  return Math.min(d,Math.PI-d);
-}
-
-function lineIntersection(p1,d1,p2,d2){
-  const cross=d1[0]*d2[1]-d1[1]*d2[0];
-  if(Math.abs(cross)<1e-6)return null;
-  const rx=p2[0]-p1[0],ry=p2[1]-p1[1];
-  const t=(rx*d2[1]-ry*d2[0])/cross;
-  return [p1[0]+d1[0]*t,p1[1]+d1[1]*t];
-}
-
-function pruneShortEdges(points,minLen){
+function compressAxisAligned(points){
   let out=points.slice();
-  let guard=0;
-  while(out.length>4&&guard++<100){
-    let shortest=Infinity,idx=-1;
-    for(let i=0;i<out.length;i++){
-      const a=out[i],b=out[(i+1)%out.length];
-      const len=Math.hypot(b[0]-a[0],b[1]-a[1]);
-      if(len<shortest){shortest=len;idx=i}
-    }
-    if(shortest>=minLen)break;
-
-    // Remove the vertex at the end of the shortest edge.
-    out.splice((idx+1)%out.length,1);
+  if(out.length>1){
+    const first=out[0],last=out[out.length-1];
+    if(first[0]===last[0]&&first[1]===last[1])out.pop();
   }
-  return out;
-}
-
-function removeNearCollinear(points,tolDeg=5){
-  let out=points.slice(),changed=true,guard=0;
-  const tol=tolDeg*Math.PI/180;
+  out=out.filter((p,i)=>i===0||p[0]!==out[i-1][0]||p[1]!==out[i-1][1]);
+  let changed=true,guard=0;
   while(changed&&out.length>4&&guard++<20){
     changed=false;
     const next=[];
     for(let i=0;i<out.length;i++){
-      const a=out[(i-1+out.length)%out.length];
-      const b=out[i];
-      const c=out[(i+1)%out.length];
-      const a1=Math.atan2(b[1]-a[1],b[0]-a[0]);
-      const a2=Math.atan2(c[1]-b[1],c[0]-b[0]);
-      if(angleDiffPi(a1,a2)<tol){changed=true;continue}
+      const a=out[(i-1+out.length)%out.length],b=out[i],c=out[(i+1)%out.length];
+      if((a[0]===b[0]&&b[0]===c[0])||(a[1]===b[1]&&b[1]===c[1])){changed=true;continue}
       next.push(b);
     }
     out=next;
@@ -320,72 +290,120 @@ function removeNearCollinear(points,tolDeg=5){
   return out;
 }
 
-function architecturalPolygonize(loop,w,h){
+function clusterValues(values,tol){
+  const sorted=[...new Set(values)].sort((a,b)=>a-b);
+  const groups=[];
+  for(const v of sorted){
+    const g=groups[groups.length-1];
+    if(g&&Math.abs(v-g.mean)<=tol){
+      g.values.push(v);
+      g.mean=g.values.reduce((a,b)=>a+b,0)/g.values.length;
+    }else{
+      groups.push({values:[v],mean:v});
+    }
+  }
+  const map=new Map();
+  groups.forEach(g=>{
+    const snapped=Math.round(g.values.reduce((a,b)=>a+b,0)/g.values.length);
+    g.values.forEach(v=>map.set(v,snapped));
+  });
+  return map;
+}
+
+function snapOrthogonalGrid(points,tol=4){
+  const xs=points.map(p=>p[0]);
+  const ys=points.map(p=>p[1]);
+  const mx=clusterValues(xs,tol),my=clusterValues(ys,tol);
+  return points.map(([x,y])=>[mx.get(x)??x,my.get(y)??y]);
+}
+
+function flattenNotches(points,depthTol,spanTol){
+  let out=compressAxisAligned(points),guard=0,changed=true;
+  while(changed&&out.length>4&&guard++<100){
+    changed=false;
+    const next=[];
+    for(let i=0;i<out.length;i++){
+      const a=out[(i-1+out.length)%out.length];
+      const b=out[i];
+      const c=out[(i+1)%out.length];
+      const d=out[(i+2)%out.length];
+      const e=out[(i+3)%out.length];
+
+      const horizontalNotch = a[1]===b[1] && b[0]===c[0] && c[1]===d[1] && d[0]===e[0] && a[1]===e[1] && Math.sign(c[1]-b[1])===-Math.sign(e[1]-d[1]);
+      const verticalNotch = a[0]===b[0] && b[1]===c[1] && c[0]===d[0] && d[1]===e[1] && a[0]===e[0] && Math.sign(c[0]-b[0])===-Math.sign(e[0]-d[0]);
+
+      if(horizontalNotch){
+        const depth=Math.abs(c[1]-b[1]);
+        const span=Math.abs(d[0]-c[0]);
+        if(depth<=depthTol && span<=spanTol){
+          next.push([e[0],e[1]]);
+          i+=3;
+          changed=true;
+          continue;
+        }
+      }
+      if(verticalNotch){
+        const depth=Math.abs(c[0]-b[0]);
+        const span=Math.abs(d[1]-c[1]);
+        if(depth<=depthTol && span<=spanTol){
+          next.push([e[0],e[1]]);
+          i+=3;
+          changed=true;
+          continue;
+        }
+      }
+      next.push(b);
+    }
+    out=compressAxisAligned(next);
+  }
+  return out;
+}
+
+function pruneShortOrthogonalEdges(points,minLen){
+  let out=compressAxisAligned(points),guard=0,changed=true;
+  while(changed&&out.length>4&&guard++<50){
+    changed=false;
+    const next=[];
+    for(let i=0;i<out.length;i++){
+      const a=out[(i-1+out.length)%out.length];
+      const b=out[i];
+      const c=out[(i+1)%out.length];
+      const len=Math.hypot(c[0]-b[0],c[1]-b[1]);
+      if(len<minLen){
+        const merged=[b[0],b[1]];
+        if(a[0]===b[0]&&c[1]===b[1]){
+          merged[0]=a[0]; merged[1]=c[1];
+        }else if(a[1]===b[1]&&c[0]===b[0]){
+          merged[0]=c[0]; merged[1]=a[1];
+        }
+        next.push(merged);
+        changed=true;
+        continue;
+      }
+      next.push(b);
+    }
+    out=compressAxisAligned(next);
+  }
+  return out;
+}
+
+function orthogonalPolygonize(loop,w,h){
   if(loop.length<4)return loop;
-
   const dim=Math.max(w,h);
-  let eps=Math.max(2.8,dim*.0045);
-  let pts=simplifyClosed(loop,eps);
+  const gridTol=Math.max(2,Math.round(dim*.0025));
+  const depthTol=Math.max(10,Math.round(dim*.020));
+  const spanTol=Math.max(24,Math.round(dim*.055));
+  const minEdge=Math.max(6,Math.round(dim*.010));
 
-  // Stronger simplification for noisy raster contours.
-  while(pts.length>36&&eps<dim*.018){
-    eps*=1.22;
-    pts=simplifyClosed(loop,eps);
-  }
+  let pts=compressAxisAligned(loop);
+  pts=snapOrthogonalGrid(pts,gridTol);
+  pts=flattenNotches(pts,depthTol,spanTol);
+  pts=pruneShortOrthogonalEdges(pts,minEdge);
+  pts=flattenNotches(pts,Math.round(depthTol*.8),Math.round(spanTol*.8));
+  pts=snapOrthogonalGrid(pts,gridTol);
+  pts=compressAxisAligned(pts);
 
-  pts=pruneShortEdges(pts,Math.max(4,dim*.0075));
-  pts=removeNearCollinear(pts,6);
-
-  if(pts.length<4)return pts;
-
-  const snapAngles=[0,Math.PI/4,Math.PI/2,3*Math.PI/4];
-  const lines=[];
-
-  for(let i=0;i<pts.length;i++){
-    const a=pts[i],b=pts[(i+1)%pts.length];
-    const dx=b[0]-a[0],dy=b[1]-a[1];
-    const len=Math.hypot(dx,dy)||1;
-    let angle=Math.atan2(dy,dx);
-    while(angle<0)angle+=Math.PI;
-    while(angle>=Math.PI)angle-=Math.PI;
-
-    let best=snapAngles[0],bestDiff=Infinity;
-    for(const candidate of snapAngles){
-      const diff=angleDiffPi(angle,candidate);
-      if(diff<bestDiff){bestDiff=diff;best=candidate}
-    }
-
-    // Architectural floor plans are overwhelmingly orthogonal. Preserve a clearly
-    // non-standard long edge only when it is far from our normal 0/45/90/135 set.
-    const snapped=bestDiff<=14*Math.PI/180 || len<dim*.10;
-    const finalAngle=snapped?best:angle;
-
-    lines.push({
-      p:[(a[0]+b[0])/2,(a[1]+b[1])/2],
-      d:[Math.cos(finalAngle),Math.sin(finalAngle)],
-      len
-    });
-  }
-
-  const out=[];
-  const maxShift=dim*.055;
-  for(let i=0;i<lines.length;i++){
-    const prev=lines[(i-1+lines.length)%lines.length];
-    const cur=lines[i];
-    let p=lineIntersection(prev.p,prev.d,cur.p,cur.d);
-    const original=pts[i];
-
-    if(!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1]) ||
-       Math.hypot(p[0]-original[0],p[1]-original[1])>maxShift){
-      p=original.slice();
-    }
-
-    p[0]=clamp(p[0],0,w);
-    p[1]=clamp(p[1],0,h);
-    out.push(p);
-  }
-
-  return removeNearCollinear(pruneShortEdges(out,Math.max(3,dim*.0055)),4);
+  return pts.map(([x,y])=>[clamp(x,0,w),clamp(y,0,h)]);
 }
 
 function contourForLabel(labelMap,target,w,h){
@@ -431,7 +449,7 @@ function contourForLabel(labelMap,target,w,h){
   if(!loops.length)return [];
   loops.sort((a,b)=>Math.abs(polygonArea(b))-Math.abs(polygonArea(a)));
   const chosen=loops[0];
-  const polygon=architecturalPolygonize(chosen,w,h);
+  const polygon=orthogonalPolygonize(chosen,w,h);
   return polygon.map(([x,y])=>({x:clamp(x/w,0,1),y:clamp(y/h,0,1)}));
 }
 
@@ -589,337 +607,48 @@ function splitWallToMidline(freeLabels,wall,w,h){
 }
 
 
-function floodExterior(free,w,h){
+function assignInteriorExteriorPockets(labelMap,w,h){
   const N=w*h;
   const seen=new Uint8Array(N);
   const queue=new Int32Array(N);
-  let head=0,tail=0;
 
-  function add(i){
-    if(i<0||i>=N||seen[i]||!free[i])return;
-    seen[i]=1;queue[tail++]=i;
-  }
-
-  for(let x=0;x<w;x++){
-    add(x);
-    add((h-1)*w+x);
-  }
-  for(let y=1;y<h-1;y++){
-    add(y*w);
-    add(y*w+w-1);
-  }
-
-  while(head<tail){
-    const i=queue[head++];
-    const y=Math.floor(i/w),x=i-y*w;
-    if(y>0)add(i-w);
-    if(x>0)add(i-1);
-    if(x<w-1)add(i+1);
-    if(y<h-1)add(i+w);
-  }
-
-  return seen;
-}
-
-function rescueBalconyAndTerracePockets(freeLabels,opaque,wall,w,h){
-  const base=Math.min(w,h);
-
-  // A separate "enclosure" mask may close façade/railing pinholes.
-  // It is NOT used for room propagation, so closing a door here is harmless:
-  // its only job is to decide whether a region is truly outside or an enclosed
-  // balcony/terrace pocket that belongs to an apartment.
-  const bridged=bridgeAxisGaps(
-    wall,w,h,
-    Math.max(5,Math.round(base*.018)),
-    Math.max(3,Math.round(base*.0045))
-  );
-
-  let enclosure=morphDilatePasses(bridged,w,h,1);
-  const enclosureFree=new Uint8Array(w*h);
-  for(let i=0;i<enclosureFree.length;i++){
-    enclosureFree[i]=opaque[i]&&!enclosure[i]?1:0;
-  }
-
-  const outside=floodExterior(enclosureFree,w,h);
-
-  // Candidate = current exterior label that becomes enclosed when façade/railing
-  // gaps are closed. This is the typical balcony/terrace failure mode.
-  const candidate=new Uint8Array(w*h);
-  for(let i=0;i<candidate.length;i++){
-    if(freeLabels[i]===-2 && enclosureFree[i] && !outside[i])candidate[i]=1;
-  }
-
-  const cc=components(candidate,w,h,true);
-  const out=new Int16Array(freeLabels);
-  let rescued=0,rescuedArea=0;
-
-  const minArea=Math.max(55,w*h*.00008);
-  const maxArea=w*h*.085;
-
-  for(const st of cc.stats){
-    if(st.area<minArea||st.area>maxArea)continue;
-
+  for(let i=0;i<N;i++){
+    if(labelMap[i]!==-2||seen[i])continue;
+    let head=0,tail=0;
+    queue[tail++]=i; seen[i]=1;
+    const cells=[];
+    let touchesBorder=false;
     const contacts=new Map();
-    let commonContacts=0;
 
-    // Look around the component perimeter for neighbouring apartment labels.
-    const pad=3;
-    const x0=Math.max(0,st.minX-pad),x1=Math.min(w-1,st.maxX+pad);
-    const y0=Math.max(0,st.minY-pad),y1=Math.min(h-1,st.maxY+pad);
-
-    for(let y=y0;y<=y1;y++){
-      for(let x=x0;x<=x1;x++){
-        const i=y*w+x;
-        if(cc.labels[i]!==st.id)continue;
-
-        for(let yy=Math.max(0,y-2);yy<=Math.min(h-1,y+2);yy++){
-          for(let xx=Math.max(0,x-2);xx<=Math.min(w-1,x+2);xx++){
-            const label=freeLabels[yy*w+xx];
-            if(label>0)contacts.set(label,(contacts.get(label)||0)+1);
-            else if(label===-1)commonContacts++;
-          }
+    while(head<tail){
+      const idx=queue[head++];
+      cells.push(idx);
+      const y=Math.floor(idx/w),x=idx-y*w;
+      if(x===0||y===0||x===w-1||y===h-1)touchesBorder=true;
+      const ns=[];
+      if(y>0)ns.push(idx-w);
+      if(x>0)ns.push(idx-1);
+      if(x<w-1)ns.push(idx+1);
+      if(y<h-1)ns.push(idx+w);
+      for(const n of ns){
+        const lab=labelMap[n];
+        if(lab===-2){
+          if(!seen[n]){seen[n]=1;queue[tail++]=n}
+        }else if(lab>0){
+          contacts.set(lab,(contacts.get(lab)||0)+1);
         }
       }
     }
 
-    if(!contacts.size)continue;
-
+    if(touchesBorder||!contacts.size)continue;
     const ranked=[...contacts.entries()].sort((a,b)=>b[1]-a[1]);
-    const [bestLabel,bestCount]=ranked[0];
-    const secondCount=ranked[1]?.[1]||0;
-
-    // A balcony should have one dominant private neighbour and should not be
-    // primarily attached to the common hall.
-    if(bestCount<8)continue;
-    if(secondCount>bestCount*.72)continue;
-    if(commonContacts>bestCount*.90)continue;
-
-    for(let i=0;i<cc.labels.length;i++){
-      if(cc.labels[i]===st.id)out[i]=bestLabel;
-    }
-
-    rescued++;
-    rescuedArea+=st.area;
-  }
-
-  return {labels:out,rescued,rescuedArea};
-}
-
-function majorityRegularizeLabels(labelMap,w,h,passes=2){
-  let cur=new Int16Array(labelMap);
-
-  for(let pass=0;pass<passes;pass++){
-    const out=new Int16Array(cur);
-
-    for(let y=1;y<h-1;y++){
-      for(let x=1;x<w-1;x++){
-        const i=y*w+x;
-        const current=cur[i];
-
-        // Keep exterior/common stable unless there is overwhelming evidence.
-        const counts=new Map();
-        for(let yy=y-1;yy<=y+1;yy++){
-          for(let xx=x-1;xx<=x+1;xx++){
-            const v=cur[yy*w+xx];
-            counts.set(v,(counts.get(v)||0)+1);
-          }
-        }
-
-        let best=current,bestCount=counts.get(current)||0;
-        for(const [label,count] of counts){
-          if(count>bestCount){best=label;bestCount=count}
-        }
-
-        if(best!==current && bestCount>=7){
-          out[i]=best;
-        }
-      }
-    }
-
-    cur=out;
-  }
-
-  return cur;
-}
-
-function blockifySharedLabels(labelMap,w,h,blockSize){
-  const b=Math.max(2,Math.round(blockSize));
-  const gw=Math.max(1,Math.ceil(w/b));
-  const gh=Math.max(1,Math.ceil(h/b));
-  const grid=new Int16Array(gw*gh);
-
-  for(let gy=0;gy<gh;gy++){
-    const y0=gy*b,y1=Math.min(h,(gy+1)*b);
-    for(let gx=0;gx<gw;gx++){
-      const x0=gx*b,x1=Math.min(w,(gx+1)*b);
-      const counts=new Map();
-
-      for(let y=y0;y<y1;y++){
-        for(let x=x0;x<x1;x++){
-          const v=labelMap[y*w+x];
-          counts.set(v,(counts.get(v)||0)+1);
-        }
-      }
-
-      let best=0,bestCount=-1;
-      for(const [label,count] of counts){
-        if(count>bestCount){
-          best=label;bestCount=count;
-        }else if(count===bestCount){
-          // Prefer a private apartment over common/exterior on ties.
-          if(label>0 && best<=0)best=label;
-        }
-      }
-      grid[gy*gw+gx]=best;
+    const [bestLabel,bestScore]=ranked[0];
+    const secondScore=ranked[1]?.[1]||0;
+    if(bestScore>=6 && bestScore>=secondScore*1.35){
+      for(const idx of cells)labelMap[idx]=bestLabel;
     }
   }
-
-  return {
-    labels:majorityRegularizeLabels(grid,gw,gh,2),
-    w:gw,
-    h:gh,
-    block:b
-  };
-}
-
-function removeOrthogonalSpikes(points,maxDepth=2){
-  let out=points.slice();
-  let changed=true,guard=0;
-
-  while(changed&&out.length>=6&&guard++<40){
-    changed=false;
-
-    for(let i=0;i<out.length;i++){
-      const a=out[i];
-      const b=out[(i+1)%out.length];
-      const c=out[(i+2)%out.length];
-      const d=out[(i+3)%out.length];
-      const e=out[(i+4)%out.length];
-
-      // Vertical main edge with a short rectangular excursion.
-      if(a[0]===b[0] && b[1]===c[1] && c[0]===d[0] && d[1]===e[1] && a[0]===e[0]){
-        const depth=Math.abs(c[0]-a[0]);
-        if(depth<=maxDepth){
-          const remove=[(i+1)%out.length,(i+2)%out.length,(i+3)%out.length].sort((x,y)=>y-x);
-          for(const ri of remove)out.splice(ri,1);
-          changed=true;break;
-        }
-      }
-
-      // Horizontal main edge with a short rectangular excursion.
-      if(a[1]===b[1] && b[0]===c[0] && c[1]===d[1] && d[0]===e[0] && a[1]===e[1]){
-        const depth=Math.abs(c[1]-a[1]);
-        if(depth<=maxDepth){
-          const remove=[(i+1)%out.length,(i+2)%out.length,(i+3)%out.length].sort((x,y)=>y-x);
-          for(const ri of remove)out.splice(ri,1);
-          changed=true;break;
-        }
-      }
-    }
-  }
-
-  return out;
-}
-
-function compressOrthogonalPoints(points){
-  let out=points.slice();
-
-  // remove duplicates
-  out=out.filter((p,i)=>i===0||p[0]!==out[i-1][0]||p[1]!==out[i-1][1]);
-
-  let changed=true,guard=0;
-  while(changed&&out.length>4&&guard++<30){
-    changed=false;
-    const next=[];
-
-    for(let i=0;i<out.length;i++){
-      const a=out[(i-1+out.length)%out.length];
-      const b=out[i];
-      const c=out[(i+1)%out.length];
-
-      if((a[0]===b[0]&&b[0]===c[0])||(a[1]===b[1]&&b[1]===c[1])){
-        changed=true;
-        continue;
-      }
-      next.push(b);
-    }
-
-    out=next;
-  }
-
-  return out;
-}
-
-function orthogonalContourForLabel(labelMap,target,w,h){
-  const edges=[];
-  const byStart=new Map();
-
-  function add(sx,sy,ex,ey,dir){
-    const id=edges.length;
-    edges.push({sx,sy,ex,ey,dir,used:false});
-    const k=key(sx,sy);
-    const arr=byStart.get(k)||[];
-    arr.push(id);
-    byStart.set(k,arr);
-  }
-
-  for(let y=0;y<h;y++){
-    for(let x=0;x<w;x++){
-      const i=y*w+x;
-      if(labelMap[i]!==target)continue;
-
-      if(y===0||labelMap[(y-1)*w+x]!==target)add(x,y,x+1,y,0);
-      if(x===w-1||labelMap[y*w+x+1]!==target)add(x+1,y,x+1,y+1,1);
-      if(y===h-1||labelMap[(y+1)*w+x]!==target)add(x+1,y+1,x,y+1,2);
-      if(x===0||labelMap[y*w+x-1]!==target)add(x,y+1,x,y,3);
-    }
-  }
-
-  const loops=[];
-  for(let e0=0;e0<edges.length;e0++){
-    if(edges[e0].used)continue;
-
-    const start=edges[e0],loop=[[start.sx,start.sy]];
-    start.used=true;
-
-    let cx=start.ex,cy=start.ey,prevDir=start.dir,safety=0;
-
-    while((cx!==start.sx||cy!==start.sy)&&safety++<edges.length+10){
-      loop.push([cx,cy]);
-      const candidates=(byStart.get(key(cx,cy))||[]).filter(id=>!edges[id].used);
-      if(!candidates.length)break;
-
-      let bestId=candidates[0],bestRank=99;
-      for(const id of candidates){
-        const d=edges[id].dir;
-        const delta=(d-prevDir+4)%4;
-        const rank=delta===1?0:delta===0?1:delta===3?2:3;
-        if(rank<bestRank){bestRank=rank;bestId=id}
-      }
-
-      const e=edges[bestId];
-      e.used=true;
-      prevDir=e.dir;
-      cx=e.ex;cy=e.ey;
-    }
-
-    if(loop.length>=4&&cx===start.sx&&cy===start.sy)loops.push(loop);
-  }
-
-  if(!loops.length)return [];
-  loops.sort((a,b)=>Math.abs(polygonArea(b))-Math.abs(polygonArea(a)));
-
-  // IMPORTANT: do not run RDP / angle snapping here.
-  // The shared label grid already provides exact 0/90 geometry. Altering each
-  // apartment independently is exactly what previously created overlaps/gaps.
-  let poly=compressOrthogonalPoints(loops[0]);
-  poly=removeOrthogonalSpikes(poly,2);
-  poly=compressOrthogonalPoints(poly);
-
-  return poly.map(([x,y])=>({
-    x:clamp(x/w,0,1),
-    y:clamp(y/h,0,1)
-  }));
+  return labelMap;
 }
 
 function topologyGuidedScore(result,seedCount){
@@ -959,32 +688,13 @@ function analyzeGuidedTopology(imageData,w,h,threshold,apartmentSeeds,commonSeed
     free[i]=opaque[i]&&!wall[i]?1:0;
   }
 
-  const rawFreeLabels=fillGuidedFreeSpace(
+  const freeLabels=fillGuidedFreeSpace(
     free,w,h,
     apartmentSeeds||[],
     commonSeeds||[]
   );
 
-  // Rescue balconies/terraces that were won by the exterior seed through thin
-  // façade/railing gaps, then split wall thickness between neighbouring regions.
-  const balconyRescue=rescueBalconyAndTerracePockets(
-    rawFreeLabels,
-    opaque,
-    wall,
-    w,h
-  );
-
-  const finalLabels=splitWallToMidline(
-    balconyRescue.labels,
-    wall,
-    w,h
-  );
-
-  // Produce EVERY apartment polygon from the SAME coarse shared label grid.
-  // This guarantees that two neighbouring apartments use exactly the same
-  // boundary coordinates instead of independently simplified contours.
-  const blockSize=Math.max(3,Math.round(Math.min(w,h)*.0032));
-  const shared=blockifySharedLabels(finalLabels,w,h,blockSize);
+  const finalLabels=assignInteriorExteriorPockets(splitWallToMidline(freeLabels,wall,w,h),w,h);
 
   const detections=[];
   for(let label=1;label<=(apartmentSeeds||[]).length;label++){
@@ -997,19 +707,14 @@ function analyzeGuidedTopology(imageData,w,h,threshold,apartmentSeeds,commonSeed
     }
     if(area<Math.max(90,N*.00035))continue;
 
-    const points=orthogonalContourForLabel(
-      shared.labels,
-      label,
-      shared.w,
-      shared.h
-    );
+    const points=contourForLabel(finalLabels,label,w,h);
     if(points.length<4)continue;
 
     detections.push({
       componentId:`topology-${label}`,
       seedIndex:label-1,
       points,
-      confidence:.98,
+      confidence:.96,
       area,
       cx:(sumX/area)/w,
       cy:(sumY/area)/h
@@ -1019,16 +724,13 @@ function analyzeGuidedTopology(imageData,w,h,threshold,apartmentSeeds,commonSeed
   detections.sort((a,b)=>a.seedIndex-b.seedIndex);
 
   let commonArea=0;
-  for(let i=0;i<N;i++)if(balconyRescue.labels[i]===-1)commonArea++;
+  for(let i=0;i<N;i++)if(freeLabels[i]===-1)commonArea++;
 
   let commonPoints=[];
   if(commonArea){
-    commonPoints=orthogonalContourForLabel(
-      shared.labels,
-      -1,
-      shared.w,
-      shared.h
-    );
+    const commonOnly=new Int16Array(N);
+    for(let i=0;i<N;i++)if(finalLabels[i]===-1)commonOnly[i]=1;
+    commonPoints=contourForLabel(commonOnly,1,w,h);
   }
 
   return {
@@ -1043,13 +745,9 @@ function analyzeGuidedTopology(imageData,w,h,threshold,apartmentSeeds,commonSeed
     opaqueCount,
     wallPixels,
     commonArea,
-    balconyRescued:balconyRescue.rescued,
-    balconyRescuedArea:balconyRescue.rescuedArea,
-    sharedGridBlock:blockSize,
     width:w,
     height:h,
-    topologyGuided:true,
-    orthogonalShared:true
+    topologyGuided:true
   };
 }
 
@@ -1393,7 +1091,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     <div className="modal-card auto-detector-card">
       <button className="x" onClick={onClose}>×</button>
       <div className="auto-head">
-        <div><small>PNG TOPOLOGY · V3.1</small><h2>Detectează apartamentele</h2><p>Poligoanele sunt acum ortogonale și generate din aceeași partiție comună: fără diagonale, fără suprapuneri între vecini. Balcoanele/terasele închise sunt recuperate automat dacă aparțin clar unui apartament.</p></div>
+        <div><small>PNG TOPOLOGY · V4</small><h2>Detectează apartamentele</h2><p>Optimizat pentru planuri tehnice curate ca al tău: pereții sunt bariere, ușile rămân treceri, holul comun concurează cu fiecare apartament, balcoanele interioare sunt reasignate la unitatea vecină, iar contururile finale sunt rectificate ortogonal.</p></div>
       </div>
 
       <div className="detector-settings detector-settings-v2">
@@ -1439,7 +1137,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
           <div>
             <b>{seedMode==='apartments'?'1. Marchează apartamentele':'2. Marchează zona comună'}</b>
             <span>{seedMode==='apartments'
-              ? 'Dă câte un click aproximativ în fiecare apartament. Camerele lui se vor uni prin ușile interioare.'
+              ? 'Dă câte un click aproximativ în fiecare apartament. Camerele lui se vor uni prin ușile interioare, iar balcoanele conectate vor fi atașate la final.'
               : 'Dă unul sau mai multe clickuri în holul comun / casa scării. Zona comună oprește un apartament să se verse în celelalte.'
             }</span>
           </div>
@@ -1482,10 +1180,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         <span>• fiecare seed de apartament se propagă prin toate camerele conectate prin uși;</span>
         <span>• seed-ul de hol comun blochează propagarea spre vecini;</span>
         <span>• exteriorul planșei este tratat ca o a treia zonă concurentă, ca să nu „curgă” poligoanele în afara clădirii;</span>
-        <span>• balcoanele/terasele pierdute către exterior sunt recuperate dacă au un singur apartament vecin dominant;</span>
-        <span>• toate poligoanele provin din aceeași grilă comună, deci vecinii sunt tangențiali și nu se suprapun;</span>
-        <span>• fiecare muchie finală este strict orizontală sau verticală: fără diagonale și fără contur după arcul ușii;</span>
-        <span>• spike-urile/notch-urile foarte scurte sunt eliminate înainte de afișarea poligonului;</span>
+        <span>• balcoanele/terasele sunt incluse dacă sunt închise de contur și accesibile din apartament;</span>
         <span>• pereții comuni sunt împărțiți aproximativ pe axa mediană;</span>
         <span>• nimic nu se salvează până nu confirmi propunerile.</span>
       </div>}
@@ -1494,7 +1189,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         <div className="detector-summary">
           <b>{result.detections.length} apartamente propuse</b>
           <span>{coreText}</span>
-          <small>{result.topologyGuided?'PNG Topology V3.1':'Architectural V2'} · {result.width}×{result.height}px analiză · prag {result.threshold}{guided?` · ${seeds.length} apartamente · ${commonSeeds.length} puncte comune`:''}{result.topologyGuided?` · ${result.balconyRescued||0} balcoane/terase recuperate`:''}</small>
+          <small>{result.topologyGuided?'PNG Topology V4':'Architectural V2'} · {result.width}×{result.height}px analiză · prag {result.threshold}{guided?` · ${seeds.length} apartamente · ${commonSeeds.length} puncte comune`:''}</small>
           <small>{guided
             ? 'Dacă o limită intră în hol, mută sau mai adaugă un punct C în acea ramură a zonei comune și regenerează.'
             : 'Poți marca o propunere drept „zonă comună” și detectorul recalculează limitele.'
