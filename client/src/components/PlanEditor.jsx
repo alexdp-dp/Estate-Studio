@@ -687,7 +687,35 @@ export default function PlanEditor({floor,onChanged}){
                     closed
                     fill={a.status==='available'?'rgba(33,194,101,.20)':a.status==='reserved'?'rgba(236,164,45,.20)':'rgba(220,72,72,.20)'}
                     stroke="rgba(15,20,18,.45)" strokeWidth={1/scale}
-                    listening={false}
+                    listening={true}
+                    onMouseEnter={()=>{
+                      if(!spaceHeld.current&&!tempPan.current.active)setStageCursor('pointer');
+                    }}
+                    onMouseLeave={()=>{
+                      if(!spaceHeld.current&&!tempPan.current.active&&!editGesture.current)setStageCursor('default');
+                    }}
+                    onMouseDown={e=>{
+                      if(spaceHeld.current||e?.evt?.button===1)return;
+                      e.cancelBubble=true;
+                    }}
+                    onTouchStart={e=>{e.cancelBubble=true}}
+                    onClick={e=>{
+                      if(spaceHeld.current||tempPan.current.active||e?.evt?.button===1)return;
+                      e.cancelBubble=true;
+                      setSelectedId(a.id);
+                      setMode('edit');
+                      setSelectedVertex(null);
+                      setSelectedEdge(null);
+                      setNotice(`Selectat ${a.code}`);
+                    }}
+                    onTap={e=>{
+                      e.cancelBubble=true;
+                      setSelectedId(a.id);
+                      setMode('edit');
+                      setSelectedVertex(null);
+                      setSelectedEdge(null);
+                      setNotice(`Selectat ${a.code}`);
+                    }}
                   />;
                 })}
 
@@ -763,10 +791,10 @@ export default function PlanEditor({floor,onChanged}){
       </div>
 
       <p className="hint">
-        În <b>Editează</b>, tragi direct de orice <b>punct</b> sau de o <b>latură</b>. <b>Undo</b> anulează pe rând mutări, ștergeri,
-        puncte adăugate și desenări; merge și cu <b>Ctrl/Cmd + Z</b>. Pentru un punct nou exact pe o dreaptă, dă <b>dublu-click pe latură</b>
-        în locul dorit; alternativ selectează latura și folosește <b>Adaugă punct pe latură</b> pentru mijloc. Ține <b>Space</b> + drag pentru pan
-        sau folosește butonul din mijloc / rotița. Scroll-ul face zoom.
+        Poți selecta apartamentul direct din lista din stânga sau prin <b>click pe poligonul lui din plan</b>. În <b>Editează</b>, tragi direct de orice
+        <b>punct</b> sau de o <b>latură</b>. <b>Undo</b> anulează pe rând mutări, ștergeri, puncte adăugate și desenări; merge și cu <b>Ctrl/Cmd + Z</b>.
+        Pentru un punct nou exact pe o dreaptă, dă <b>dublu-click pe latură</b> în locul dorit; alternativ selectează latura și folosește
+        <b>Adaugă punct pe latură</b> pentru mijloc. Ține <b>Space</b> + drag pentru pan sau folosește butonul din mijloc / rotița. Scroll-ul face zoom.
       </p>
     </div>
   );

@@ -1,3 +1,18 @@
+# Estate Studio — Build 04.4.15 Click Select Polygon
+
+Update peste 04.4.14.
+
+## Nou
+- în editorul de planuri/apartamente, apartamentul poate fi selectat direct prin **click pe poligonul lui din plan**;
+- nu mai este obligatoriu să alegi apartamentul doar din lista din stânga;
+- click-ul pe un poligon schimbă imediat apartamentul activ și intră în modul **Editează**;
+- punctele și laturile poligonului selectat apar imediat pentru editare;
+- hover-ul pe un poligon neselectat folosește cursor `pointer`;
+- `Space + drag` / middle mouse pentru pan rămân compatibile;
+- drag punct, drag latură, delete, undo și insert vertex rămân neschimbate.
+
+`/api/version` => `04.4.15-click-select-polygon`
+
 # Estate Studio — Build 04.4.14 Undo + Insert Vertex
 
 Update peste 04.4.13, fără să schimb logica de drag/pan care funcționează.
