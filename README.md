@@ -1,3 +1,25 @@
+# Estate Studio — Build 04.4.16 Room Type Colors
+
+Update rapid peste 04.4.15.
+
+## Culori poligoane
+Pentru apartamente **available**, culoarea depinde de numărul de camere:
+- Studio / 1 cameră: **vernil** `#A8CFA3`
+- 2 camere: **mov** `#8A73B8`
+- 3 camere: **verde închis** `#356B57`
+- 4+ camere: **petrol** `#3F7C87`
+
+Pentru status:
+- **reserved** rămâne galben;
+- **sold** rămâne roșu;
+- statusul are prioritate față de numărul de camere.
+
+În frontend, hover-ul păstrează aceeași familie de culoare și doar o face mai intensă/închisă. Blend-ul `multiply` și lipsa chenarului rămân neschimbate.
+
+În editorul de mapping din admin, poligoanele folosesc aceeași codificare cromatică.
+
+`/api/version` => `04.4.16-room-type-colors`
+
 # Estate Studio — Build 04.4.15 Click Select Polygon
 
 Update peste 04.4.14.

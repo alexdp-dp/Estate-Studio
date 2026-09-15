@@ -517,3 +517,71 @@ a.primary:hover,
 .plan-public .plan-image-wrap polygon.sold.hovered{
   fill:rgba(190,49,49,.54);
 }
+
+
+/* 04.4.16 — available apartment colors by room count.
+   Reserved and sold always override room type. */
+.room-legend{
+  flex-wrap:wrap;
+  justify-content:flex-end;
+  max-width:620px;
+}
+.legend i.studio{background:#a8cfa3}
+.legend i.room2{background:#8a73b8}
+.legend i.room3{background:#356b57}
+.legend i.room4{background:#3f7c87}
+
+/* AVAILABLE only */
+.plan-public .plan-image-wrap polygon.available.rooms-studio{
+  fill:rgba(168,207,163,.40);
+}
+.plan-public .plan-image-wrap polygon.available.rooms-2{
+  fill:rgba(138,115,184,.40);
+}
+.plan-public .plan-image-wrap polygon.available.rooms-3{
+  fill:rgba(53,107,87,.40);
+}
+.plan-public .plan-image-wrap polygon.available.rooms-4{
+  fill:rgba(63,124,135,.40);
+}
+.plan-public .plan-image-wrap polygon.available.rooms-other{
+  fill:rgba(98,151,137,.38);
+}
+
+/* HOVER — same hue, darker/stronger */
+.plan-public .plan-image-wrap polygon.available.rooms-studio:hover,
+.plan-public .plan-image-wrap polygon.available.rooms-studio.hovered{
+  fill:rgba(113,174,116,.62);
+}
+.plan-public .plan-image-wrap polygon.available.rooms-2:hover,
+.plan-public .plan-image-wrap polygon.available.rooms-2.hovered{
+  fill:rgba(112,83,164,.62);
+}
+.plan-public .plan-image-wrap polygon.available.rooms-3:hover,
+.plan-public .plan-image-wrap polygon.available.rooms-3.hovered{
+  fill:rgba(38,91,70,.62);
+}
+.plan-public .plan-image-wrap polygon.available.rooms-4:hover,
+.plan-public .plan-image-wrap polygon.available.rooms-4.hovered{
+  fill:rgba(43,105,116,.62);
+}
+.plan-public .plan-image-wrap polygon.available.rooms-other:hover,
+.plan-public .plan-image-wrap polygon.available.rooms-other.hovered{
+  fill:rgba(76,133,119,.60);
+}
+
+/* Status overrides stay exactly status-driven, regardless of room class. */
+.plan-public .plan-image-wrap polygon.reserved{
+  fill:rgba(228,161,44,.34);
+}
+.plan-public .plan-image-wrap polygon.reserved:hover,
+.plan-public .plan-image-wrap polygon.reserved.hovered{
+  fill:rgba(198,130,16,.54);
+}
+.plan-public .plan-image-wrap polygon.sold{
+  fill:rgba(215,76,76,.34);
+}
+.plan-public .plan-image-wrap polygon.sold:hover,
+.plan-public .plan-image-wrap polygon.sold.hovered{
+  fill:rgba(190,49,49,.54);
+}

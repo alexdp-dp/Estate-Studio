@@ -20,6 +20,18 @@ function polygonPoints(apartment){
   return rel?.points||[];
 }
 
+function apartmentPolygonColor(a,active=false){
+  if(a?.status==='reserved') return active?'rgba(198,130,16,.46)':'rgba(228,161,44,.24)';
+  if(a?.status==='sold') return active?'rgba(190,49,49,.46)':'rgba(215,76,76,.24)';
+
+  const rooms=Number(a?.rooms);
+  if(rooms<=1) return active?'rgba(113,174,116,.46)':'rgba(168,207,163,.28)';   // vernil
+  if(rooms===2) return active?'rgba(112,83,164,.46)':'rgba(138,115,184,.28)';   // mov
+  if(rooms===3) return active?'rgba(38,91,70,.46)':'rgba(53,107,87,.28)';       // verde închis
+  if(rooms>=4) return active?'rgba(43,105,116,.46)':'rgba(63,124,135,.28)';     // petrol
+  return active?'rgba(76,133,119,.42)':'rgba(98,151,137,.26)';
+}
+
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const clamp01=v=>clamp(v,0,1);
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
@@ -685,7 +697,7 @@ export default function PlanEditor({floor,onChanged}){
                     key={a.id}
                     points={ps.flatMap(p=>[imgRect.x+p.x*imgRect.w,imgRect.y+p.y*imgRect.h])}
                     closed
-                    fill={a.status==='available'?'rgba(33,194,101,.20)':a.status==='reserved'?'rgba(236,164,45,.20)':'rgba(220,72,72,.20)'}
+                    fill={apartmentPolygonColor(a,false)}
                     stroke="rgba(15,20,18,.45)" strokeWidth={1/scale}
                     listening={true}
                     onMouseEnter={()=>{
@@ -723,7 +735,7 @@ export default function PlanEditor({floor,onChanged}){
                   <Line
                     points={draft.flatMap(p=>[imgRect.x+p.x*imgRect.w,imgRect.y+p.y*imgRect.h])}
                     closed={draft.length>=3}
-                    fill="rgba(19,173,88,.26)" stroke="#0e8f48" strokeWidth={2/scale}
+                    fill={apartmentPolygonColor(selected,true)} stroke="#0e8f48" strokeWidth={2/scale}
                     listening={false}
                   />
 

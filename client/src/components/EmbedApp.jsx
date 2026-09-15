@@ -8,6 +8,17 @@ function polygonPoints(apartment){
   if(Array.isArray(rel))return rel[0]?.points||[];
   return rel?.points||[];
 }
+
+function roomColorClass(a){
+  if(a?.status!=='available')return '';
+  const rooms=Number(a?.rooms);
+  if(!Number.isFinite(rooms))return ' rooms-other';
+  if(rooms<=1)return ' rooms-studio';
+  if(rooms===2)return ' rooms-2';
+  if(rooms===3)return ' rooms-3';
+  if(rooms>=4)return ' rooms-4';
+  return ' rooms-other';
+}
 function FloorOverlay({floor,onClose,onApartment}){
   const [hover,setHover]=useState(null);
 
@@ -22,14 +33,14 @@ function FloorOverlay({floor,onClose,onApartment}){
   }
 
   return <div className="embed-overlay"><div className="floor-sheet"><button className="sheet-close" onClick={onClose}>×</button>
-    <div className="sheet-head"><div><span>PLAN ETAJ</span><h2>{floor.name}</h2></div><div className="legend"><i className="available"/>Disponibil <i className="reserved"/>Rezervat <i className="sold"/>Vândut</div></div>
+    <div className="sheet-head"><div><span>PLAN ETAJ</span><h2>{floor.name}</h2></div><div className="legend room-legend"><i className="studio"/>Studio <i className="room2"/>2 camere <i className="room3"/>3 camere <i className="room4"/>4 camere <i className="reserved"/>Rezervat <i className="sold"/>Vândut</div></div>
     <div className="plan-public">{floor.plan_path?<div className="plan-image-wrap"><img src={floor.plan_path}/><svg viewBox="0 0 100 100" preserveAspectRatio="none">
       {(floor.apartments||[]).map(a=>{
         const ps=polygonPoints(a);
         if(ps.length<=2)return null;
         return <polygon
           key={a.id}
-          className={`${a.status}${hover?.a?.id===a.id?' hovered':''}`}
+          className={`${a.status}${roomColorClass(a)}${hover?.a?.id===a.id?' hovered':''}`}
           points={ps.map(p=>`${p.x*100},${p.y*100}`).join(' ')}
           onMouseEnter={e=>hoverApartment(a,e)}
           onMouseMove={e=>hoverApartment(a,e)}
