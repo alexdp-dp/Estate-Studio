@@ -1,3 +1,27 @@
+# Estate Studio — Build 04.4.29 Project Back Runtime Fix
+
+Hotfix peste 04.4.28.
+
+## Bug reparat
+Când ieșeai dintr-un proiect cu `← Proiecte`, React încerca să execute ca funcție valoarea returnată de `useEffect(load, [id])`.
+
+`load()` returna Promise-ul de la `api(...)`. Pentru React, orice valoare returnată direct de un `useEffect` este tratată drept cleanup function la unmount. La navigarea înapoi, React încerca astfel să "apeleze" Promise-ul, ceea ce producea runtime error-ul:
+
+`TypeError: t is not a function`
+
+Refresh-ul funcționa pentru că pagina pornea direct pe ruta Proiecte și componenta Project nu mai trebuia demontată.
+
+## Fix
+- `useEffect` nu mai returnează Promise-ul API;
+- request-ul inițial este pornit în interiorul effect-ului;
+- cleanup-ul este acum o funcție reală;
+- este blocată actualizarea de state după unmount;
+- `reload()` rămâne separat și funcționează pentru toate secțiunile proiectului.
+
+Nu sunt modificate viewerul, wheel picker-ul, mappingul sau celelalte funcții.
+
+`/api/version` => `04.4.29-project-back-runtime-fix`
+
 # Estate Studio — Build 04.4.28 Wheel Spacing + Cues
 
 Update rapid peste 04.4.27.
