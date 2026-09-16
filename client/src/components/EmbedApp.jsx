@@ -34,7 +34,13 @@ function FloorOverlay({floor,onClose,onApartment}){
 
   return <div className="embed-overlay"><div className="floor-sheet"><button className="sheet-close" onClick={onClose}>×</button>
     <div className="sheet-head"><div><span>PLAN ETAJ</span><h2>{floor.name}</h2></div><div className="legend room-legend"><i className="studio"/>Studio <i className="room2"/>2 camere <i className="room3"/>3 camere <i className="room4"/>4 camere <i className="reserved"/>Rezervat <i className="sold"/>Vândut</div></div>
-    <div className="plan-public">{floor.plan_path?<div className="plan-image-wrap"><img src={floor.plan_path}/><svg viewBox="0 0 100 100" preserveAspectRatio="none">
+    <div className="plan-public">{floor.plan_path?<div className="plan-image-wrap"><img
+      src={floor.plan_path}
+      style={{
+        transform:`scaleX(${floor?.settings?.plan_flip_h?-1:1}) scaleY(${floor?.settings?.plan_flip_v?-1:1})`,
+        transformOrigin:'center center'
+      }}
+    /><svg viewBox="0 0 100 100" preserveAspectRatio="none">
       {(floor.apartments||[]).map(a=>{
         const ps=polygonPoints(a);
         if(ps.length<=2)return null;

@@ -1783,6 +1783,24 @@ async function loadPlan(url,maxDim=1650){
   return {imageData:ctx.getImageData(0,0,w,h),w,h};
 }
 
+function flipLoadedPlan(loaded,flipH=false,flipV=false){
+  if(!flipH&&!flipV)return loaded;
+  const {imageData,w,h}=loaded;
+  const src=imageData.data;
+  const out=new ImageData(w,h);
+  const dst=out.data;
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const sx=flipH?(w-1-x):x;
+      const sy=flipV?(h-1-y):y;
+      const si=(sy*w+sx)*4;
+      const di=(y*w+x)*4;
+      dst[di]=src[si];dst[di+1]=src[si+1];dst[di+2]=src[si+2];dst[di+3]=src[si+3];
+    }
+  }
+  return {imageData:out,w,h};
+}
+
 const colors=[
   '#22b573','#4f7cff','#f28d63','#9b6ad6','#e4b743','#00a7b5','#e66f9d','#7eb54b',
   '#d66d3a','#607dcb','#7f62a3','#57a86b','#ca6f8a','#b3a33c','#3f94b8','#d58043'
@@ -1809,13 +1827,16 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
   const [mapping,setMapping]=useState({});
 
   const existing=floor?.apartments||[];
+  const planFlipH=!!floor?.settings?.plan_flip_h;
+  const planFlipV=!!floor?.settings?.plan_flip_v;
+  const planFlipStyle={transform:`scaleX(${planFlipH?-1:1}) scaleY(${planFlipV?-1:1})`,transformOrigin:'center center'};
 
   useEffect(()=>{
     if(!guided || raw || !floor?.plan_path)return;
     let cancelled=false;
     (async()=>{
       try{
-        const loaded=await loadPlan(floor.plan_path);
+        const loaded=flipLoadedPlan(await loadPlan(floor.plan_path),planFlipH,planFlipV);
         if(cancelled)return;
         setRaw(loaded);
         setAspect(loaded.w/Math.max(1,loaded.h));
@@ -1830,7 +1851,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
     if(!floor?.plan_path)return;
     setBusy(true);setMessage('');
     try{
-      const loaded=raw||await loadPlan(floor.plan_path);
+      const loaded=raw||flipLoadedPlan(await loadPlan(floor.plan_path),planFlipH,planFlipV);
       if(!raw)setRaw(loaded);
       if(guided&&(!seeds.length||!commonSeeds.length)){
         throw new Error('În Mod asistat pune cel puțin un punct în fiecare apartament și cel puțin un punct în holul / zona comună.');
@@ -2075,6 +2096,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
           <img
             src={floor.plan_path}
             alt={`Plan ${floor.name}`}
+            style={planFlipStyle}
             onLoad={e=>setAspect(e.currentTarget.naturalWidth/Math.max(1,e.currentTarget.naturalHeight))}
           />
           <svg viewBox="0 0 1000 1000" preserveAspectRatio="none">
@@ -2163,7 +2185,7 @@ export default function AutoApartmentDetector({floor,onClose,onCommitted}){
         </div>}
 
         <div className={'detector-preview '+(guided?'guided':'')} style={{aspectRatio:aspect||1}} onClick={addSeed}>
-          <img src={floor.plan_path} alt={`Plan ${floor.name}`} onLoad={e=>setAspect(e.currentTarget.naturalWidth/Math.max(1,e.currentTarget.naturalHeight))}/>
+          <img src={floor.plan_path} alt={`Plan ${floor.name}`} style={planFlipStyle} onLoad={e=>setAspect(e.currentTarget.naturalWidth/Math.max(1,e.currentTarget.naturalHeight))}/>
           <svg viewBox="0 0 1000 1000" preserveAspectRatio="none">
             {result.likelyCore?.points?.length>3&&<polygon
               className="common-core"

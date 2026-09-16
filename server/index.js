@@ -16,7 +16,7 @@ function verifyPassword(password,record){const [,it,salt64,hash64]=record.split(
 function auth(req,res,next){try{req.user=jwt.verify(req.cookies.es_token,JWT_SECRET);next()}catch{res.status(401).json({error:'Unauthorized'})}}
 function clean(o,allowed){return Object.fromEntries(Object.entries(o||{}).filter(([k])=>allowed.includes(k)))}
 function send(res,data,error,status=500){if(error)return res.status(status).json({error:error.message||String(error)});res.json(data)}
-app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.4.17-copy-flip-paste-move',time:'2026-09-14'}));
+app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.4.19-copy-complete-building',time:'2026-09-14'}));
 app.get('/api/health',async(req,res)=>{const {error}=await sb.from('projects').select('id',{head:true,count:'exact'});res.status(error?500:200).json({ok:!error,supabase:!error,error:error?.message})});
 app.post('/api/auth/login',(req,res)=>{if(req.body?.username===ADMIN_USER&&verifyPassword(String(req.body?.password||''),ADMIN_HASH)){const token=jwt.sign({sub:ADMIN_USER},JWT_SECRET,{expiresIn:'24h'});res.cookie('es_token',token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',maxAge:86400000});return res.json({ok:true,user:ADMIN_USER})}res.status(401).json({error:'User sau parolă incorecte'})});
 app.get('/api/auth/me',auth,(req,res)=>res.json({user:req.user.sub}));
@@ -38,8 +38,409 @@ app.post('/api/admin/buildings',auth,async(req,res)=>{const {data,error}=await s
 app.patch('/api/admin/buildings/:id',auth,async(req,res)=>{const {data,error}=await sb.from('buildings').update(clean(req.body,buildingAllowed)).eq('id',req.params.id).select().single();send(res,data,error)});
 app.delete('/api/admin/buildings/:id',auth,async(req,res)=>{const {data,error}=await sb.from('buildings').delete().eq('id',req.params.id).select();send(res,data,error)});
 app.post('/api/admin/buildings/:id/generate-floors',auth,async(req,res)=>{try{const count=Math.max(1,Math.min(100,Number(req.body.count)||1)),standard=Number(req.body.standard)||3,gd=!!req.body.groundDifferent,ground=gd?(Number(req.body.ground)||standard):standard;await sb.from('floors').delete().eq('building_id',req.params.id);let from=0;const rows=[];for(let i=0;i<count;i++){const h=i===0?ground:standard;rows.push({building_id:req.params.id,name:i===0?'Parter':`Etaj ${i}`,floor_number:i,sort_order:i,height_from_m:from,height_to_m:from+h});from+=h}const {data,error}=await sb.from('floors').insert(rows).select();if(error)throw error;await sb.from('buildings').update({floors_count:count,default_floor_height_m:standard,ground_floor_different:gd,ground_floor_height_m:ground,real_height_m:from}).eq('id',req.params.id);res.json(data)}catch(e){send(res,null,e)}});
+
+async function deleteFloorApartments(floorId){
+  const {data:aps,error:ae}=await sb.from('apartments').select('id').eq('floor_id',floorId);
+  if(ae)throw ae;
+  const ids=(aps||[]).map(a=>a.id);
+  if(ids.length){
+    const {error:pe}=await sb.from('apartment_polygons').delete().in('apartment_id',ids);
+    if(pe)throw pe;
+    const {error:de}=await sb.from('apartments').delete().in('id',ids);
+    if(de)throw de;
+  }
+}
+function transformedPoints(points,flipH,flipV){
+  return (points||[]).map(p=>({
+    x:Math.max(0,Math.min(1,flipH?1-Number(p.x):Number(p.x))),
+    y:Math.max(0,Math.min(1,flipV?1-Number(p.y):Number(p.y)))
+  }));
+}
+function autoApartmentCode({floor,building,sourceBuildingId,index,customPrefix}){
+  const floorNo=Number.isFinite(Number(floor?.floor_number))?Number(floor.floor_number):Number(floor?.sort_order||0);
+  const stem=floorNo===0?'P':String(floorNo);
+  const sameBuilding=building?.id===sourceBuildingId;
+  const autoPrefix=sameBuilding?'':`B${Number(building?.sort_order||0)+1}-`;
+  const prefix=String(customPrefix||'').trim()||autoPrefix;
+  return `${prefix}${stem}${String(index+1).padStart(2,'0')}`;
+}
+
+
+app.post('/api/admin/buildings/:id/copy-floor-structure',auth,async(req,res)=>{
+  try{
+    const sourceId=req.params.id;
+    const targets=[...new Set((req.body?.target_building_ids||[]).filter(id=>id&&id!==sourceId))];
+    if(!targets.length)return res.status(400).json({error:'Selectează cel puțin un bloc țintă.'});
+
+    const {data:source,error:se}=await sb.from('buildings').select('*').eq('id',sourceId).single();
+    if(se)throw se;
+    const {data:sourceFloors,error:sfe}=await sb.from('floors').select('*').eq('building_id',sourceId).order('sort_order');
+    if(sfe)throw sfe;
+    if(!(sourceFloors||[]).length)return res.status(400).json({error:'Blocul sursă nu are etaje de copiat.'});
+
+    const {data:targetBuildings,error:tbe}=await sb.from('buildings').select('*').in('id',targets);
+    if(tbe)throw tbe;
+    if((targetBuildings||[]).some(b=>b.project_id!==source.project_id)){
+      return res.status(400).json({error:'Blocurile țintă trebuie să fie din același proiect.'});
+    }
+
+    const results=[];
+    for(const target of targetBuildings||[]){
+      const {data:existing,error:efe}=await sb.from('floors').select('*').eq('building_id',target.id).order('sort_order');
+      if(efe)throw efe;
+      const existingByOrder=new Map((existing||[]).map(f=>[Number(f.sort_order),f]));
+
+      for(const sf of sourceFloors||[]){
+        const row={
+          name:sf.name,
+          floor_number:sf.floor_number,
+          sort_order:sf.sort_order,
+          height_from_m:sf.height_from_m,
+          height_to_m:sf.height_to_m
+        };
+        const tf=existingByOrder.get(Number(sf.sort_order));
+        if(tf){
+          const {error:ue}=await sb.from('floors').update(row).eq('id',tf.id);
+          if(ue)throw ue;
+        }else{
+          const {error:ie}=await sb.from('floors').insert({...row,building_id:target.id});
+          if(ie)throw ie;
+        }
+      }
+
+      const validOrders=new Set((sourceFloors||[]).map(f=>Number(f.sort_order)));
+      const extras=(existing||[]).filter(f=>!validOrders.has(Number(f.sort_order)));
+      for(const extra of extras){
+        await deleteFloorApartments(extra.id);
+        const {error:de}=await sb.from('floors').delete().eq('id',extra.id);
+        if(de)throw de;
+      }
+
+      const buildingPatch={
+        floors_count:sourceFloors.length,
+        default_floor_height_m:source.default_floor_height_m,
+        ground_floor_different:source.ground_floor_different,
+        ground_floor_height_m:source.ground_floor_height_m,
+        real_height_m:source.real_height_m
+      };
+      const {error:bue}=await sb.from('buildings').update(buildingPatch).eq('id',target.id);
+      if(bue)throw bue;
+      results.push({building_id:target.id,name:target.name,floors:sourceFloors.length,removed_extra_floors:extras.length});
+    }
+
+    res.json({copied_from:sourceId,targets:results});
+  }catch(e){send(res,null,e)}
+});
+
+
+app.post('/api/admin/buildings/:id/copy-complete-building-layout',auth,async(req,res)=>{
+  try{
+    const sourceId=req.params.id;
+    const targetConfigs=Array.isArray(req.body?.targets)?req.body.targets:[];
+    const configs=targetConfigs
+      .filter(t=>t?.building_id&&t.building_id!==sourceId)
+      .map(t=>({
+        building_id:t.building_id,
+        flip_h:!!t.flip_h,
+        flip_v:!!t.flip_v
+      }));
+    if(!configs.length)return res.status(400).json({error:'Selectează cel puțin un bloc țintă.'});
+
+    const copyMode=['geometry','rooms','all'].includes(req.body?.copy_mode)?req.body.copy_mode:'rooms';
+
+    const {data:source,error:se}=await sb.from('buildings').select('*').eq('id',sourceId).single();
+    if(se)throw se;
+    const {data:sourceFloors,error:sfe}=await sb.from('floors').select('*').eq('building_id',sourceId).order('sort_order');
+    if(sfe)throw sfe;
+    if(!(sourceFloors||[]).length)return res.status(400).json({error:'Blocul sursă nu are etaje.'});
+
+    const sourceApartmentsByFloor=new Map();
+    for(const sf of sourceFloors||[]){
+      const {data:aps,error:ae}=await sb
+        .from('apartments')
+        .select('*, apartment_polygons(points)')
+        .eq('floor_id',sf.id)
+        .order('code');
+      if(ae)throw ae;
+      sourceApartmentsByFloor.set(sf.id,aps||[]);
+    }
+
+    const targetIds=[...new Set(configs.map(t=>t.building_id))];
+    const {data:targets,error:tbe}=await sb.from('buildings').select('*').in('id',targetIds);
+    if(tbe)throw tbe;
+    const targetById=new Map((targets||[]).map(b=>[b.id,b]));
+    if((targets||[]).some(b=>b.project_id!==source.project_id)){
+      return res.status(400).json({error:'Blocurile țintă trebuie să fie din același proiect.'});
+    }
+
+    const results=[];
+    for(const cfg of configs){
+      const target=targetById.get(cfg.building_id);
+      if(!target)continue;
+
+      const {data:existing,error:efe}=await sb.from('floors').select('*').eq('building_id',target.id).order('sort_order');
+      if(efe)throw efe;
+      const existingByOrder=new Map((existing||[]).map(f=>[Number(f.sort_order),f]));
+      const targetFloorByOrder=new Map();
+
+      // 1) Synchronize floor structure while preserving the target floor IDs when possible.
+      for(const sf of sourceFloors||[]){
+        const structure={
+          name:sf.name,
+          floor_number:sf.floor_number,
+          sort_order:sf.sort_order,
+          height_from_m:sf.height_from_m,
+          height_to_m:sf.height_to_m
+        };
+        const old=existingByOrder.get(Number(sf.sort_order));
+        if(old){
+          const {data:updated,error:ue}=await sb.from('floors').update(structure).eq('id',old.id).select().single();
+          if(ue)throw ue;
+          targetFloorByOrder.set(Number(sf.sort_order),updated);
+        }else{
+          const {data:created,error:ie}=await sb.from('floors').insert({...structure,building_id:target.id}).select().single();
+          if(ie)throw ie;
+          targetFloorByOrder.set(Number(sf.sort_order),created);
+        }
+      }
+
+      // Remove target levels that do not exist in the source block.
+      const validOrders=new Set((sourceFloors||[]).map(f=>Number(f.sort_order)));
+      const extras=(existing||[]).filter(f=>!validOrders.has(Number(f.sort_order)));
+      for(const extra of extras){
+        await deleteFloorApartments(extra.id);
+        const {error:de}=await sb.from('floors').delete().eq('id',extra.id);
+        if(de)throw de;
+      }
+
+      const {error:bue}=await sb.from('buildings').update({
+        floors_count:sourceFloors.length,
+        default_floor_height_m:source.default_floor_height_m,
+        ground_floor_different:source.ground_floor_different,
+        ground_floor_height_m:source.ground_floor_height_m,
+        real_height_m:source.real_height_m
+      }).eq('id',target.id);
+      if(bue)throw bue;
+
+      // 2) For every source floor, replace target layout with a fresh clone.
+      let createdApartments=0,mappedApartments=0,copiedPlans=0;
+      for(const sf of sourceFloors||[]){
+        const tf=targetFloorByOrder.get(Number(sf.sort_order));
+        if(!tf)continue;
+
+        await deleteFloorApartments(tf.id);
+
+        const sourceFlipH=!!sf.settings?.plan_flip_h;
+        const sourceFlipV=!!sf.settings?.plan_flip_v;
+        const nextSettings={
+          ...(sf.settings||{}),
+          plan_flip_h:sourceFlipH!==cfg.flip_h,
+          plan_flip_v:sourceFlipV!==cfg.flip_v,
+          layout_source_floor_id:sf.id,
+          layout_source_building_id:source.id,
+          layout_copied_at:new Date().toISOString()
+        };
+
+        const {error:fue}=await sb.from('floors').update({
+          plan_path:sf.plan_path||null,
+          plan_width:sf.plan_width||null,
+          plan_height:sf.plan_height||null,
+          settings:nextSettings
+        }).eq('id',tf.id);
+        if(fue)throw fue;
+        if(sf.plan_path)copiedPlans++;
+
+        const sourceAps=sourceApartmentsByFloor.get(sf.id)||[];
+        for(let i=0;i<sourceAps.length;i++){
+          const srcAp=sourceAps[i];
+          const code=autoApartmentCode({
+            floor:tf,
+            building:target,
+            sourceBuildingId:source.id,
+            index:i,
+            customPrefix:''
+          });
+          const row={
+            floor_id:tf.id,
+            code,
+            title:`Apartament ${code}`,
+            status:'available',
+            rooms:(copyMode==='rooms'||copyMode==='all')?srcAp.rooms:null
+          };
+          if(copyMode==='all'){
+            Object.assign(row,{
+              usable_area_sqm:srcAp.usable_area_sqm,
+              total_area_sqm:srcAp.total_area_sqm,
+              price:srcAp.price,
+              currency:srcAp.currency||'EUR',
+              description:srcAp.description,
+              image_path:srcAp.image_path,
+              external_url:srcAp.external_url
+            });
+          }
+
+          const {data:newAp,error:iae}=await sb.from('apartments').insert(row).select().single();
+          if(iae)throw iae;
+          createdApartments++;
+
+          const rel=srcAp.apartment_polygons;
+          const points=Array.isArray(rel)?rel[0]?.points||[]:rel?.points||[];
+          if(points.length>=3){
+            const {error:ipe}=await sb.from('apartment_polygons').insert({
+              apartment_id:newAp.id,
+              points:transformedPoints(points,cfg.flip_h,cfg.flip_v)
+            });
+            if(ipe)throw ipe;
+            mappedApartments++;
+          }
+        }
+      }
+
+      results.push({
+        building_id:target.id,
+        building_name:target.name,
+        floors:sourceFloors.length,
+        copied_plans:copiedPlans,
+        created_apartments:createdApartments,
+        mapped_apartments:mappedApartments,
+        flip_h:cfg.flip_h,
+        flip_v:cfg.flip_v,
+        removed_extra_floors:extras.length
+      });
+    }
+
+    res.json({source_building_id:sourceId,copy_mode:copyMode,targets:results});
+  }catch(e){send(res,null,e)}
+});
+
 const floorAllowed=['name','floor_number','sort_order','height_from_m','height_to_m','plan_path','model_node_name','plan_width','plan_height','settings'];
 app.patch('/api/admin/floors/:id',auth,async(req,res)=>{const {data,error}=await sb.from('floors').update(clean(req.body,floorAllowed)).eq('id',req.params.id).select().single();send(res,data,error)});
+
+app.post('/api/admin/floors/:id/copy-layout',auth,async(req,res)=>{
+  try{
+    const sourceFloorId=req.params.id;
+    const targetIds=[...new Set((req.body?.target_floor_ids||[]).filter(id=>id&&id!==sourceFloorId))];
+    if(!targetIds.length)return res.status(400).json({error:'Selectează cel puțin un etaj țintă.'});
+
+    const copyMode=['geometry','rooms','all'].includes(req.body?.copy_mode)?req.body.copy_mode:'rooms';
+    const extraFlipH=!!req.body?.flip_h;
+    const extraFlipV=!!req.body?.flip_v;
+    const customPrefix=String(req.body?.code_prefix||'').trim();
+
+    const {data:sourceFloor,error:sfe}=await sb.from('floors').select('*').eq('id',sourceFloorId).single();
+    if(sfe)throw sfe;
+    if(!sourceFloor.plan_path)return res.status(400).json({error:'Etajul sursă nu are plan încărcat.'});
+
+    const {data:sourceBuilding,error:sbe}=await sb.from('buildings').select('*').eq('id',sourceFloor.building_id).single();
+    if(sbe)throw sbe;
+
+    const {data:sourceAps,error:sae}=await sb
+      .from('apartments')
+      .select('*, apartment_polygons(points)')
+      .eq('floor_id',sourceFloorId)
+      .order('code');
+    if(sae)throw sae;
+    if(!(sourceAps||[]).length)return res.status(400).json({error:'Etajul sursă nu are apartamente de copiat.'});
+
+    const {data:targetFloors,error:tfe}=await sb.from('floors').select('*').in('id',targetIds);
+    if(tfe)throw tfe;
+    const targetBuildingIds=[...new Set((targetFloors||[]).map(f=>f.building_id))];
+    const {data:targetBuildings,error:tbe}=await sb.from('buildings').select('*').in('id',targetBuildingIds);
+    if(tbe)throw tbe;
+    const buildingById=new Map((targetBuildings||[]).map(b=>[b.id,b]));
+    if((targetBuildings||[]).some(b=>b.project_id!==sourceBuilding.project_id)){
+      return res.status(400).json({error:'Etajele țintă trebuie să fie din același proiect.'});
+    }
+
+    const sourceFlipH=!!sourceFloor.settings?.plan_flip_h;
+    const sourceFlipV=!!sourceFloor.settings?.plan_flip_v;
+    const effectivePlanFlipH=sourceFlipH!==extraFlipH;
+    const effectivePlanFlipV=sourceFlipV!==extraFlipV;
+
+    const results=[];
+    for(const targetFloor of targetFloors||[]){
+      const targetBuilding=buildingById.get(targetFloor.building_id);
+      if(!targetBuilding)continue;
+
+      await deleteFloorApartments(targetFloor.id);
+
+      const nextSettings={
+        ...(targetFloor.settings||{}),
+        plan_flip_h:effectivePlanFlipH,
+        plan_flip_v:effectivePlanFlipV,
+        layout_source_floor_id:sourceFloorId,
+        layout_copied_at:new Date().toISOString()
+      };
+      const {error:fue}=await sb.from('floors').update({
+        plan_path:sourceFloor.plan_path,
+        plan_width:sourceFloor.plan_width,
+        plan_height:sourceFloor.plan_height,
+        settings:nextSettings
+      }).eq('id',targetFloor.id);
+      if(fue)throw fue;
+
+      let created=0,mapped=0;
+      for(let i=0;i<(sourceAps||[]).length;i++){
+        const src=sourceAps[i];
+        const code=autoApartmentCode({
+          floor:targetFloor,
+          building:targetBuilding,
+          sourceBuildingId:sourceBuilding.id,
+          index:i,
+          customPrefix
+        });
+
+        const row={
+          floor_id:targetFloor.id,
+          code,
+          title:`Apartament ${code}`,
+          status:'available',
+          rooms:copyMode==='rooms'||copyMode==='all'?src.rooms:null
+        };
+
+        if(copyMode==='all'){
+          Object.assign(row,{
+            usable_area_sqm:src.usable_area_sqm,
+            total_area_sqm:src.total_area_sqm,
+            price:src.price,
+            currency:src.currency||'EUR',
+            description:src.description,
+            image_path:src.image_path,
+            external_url:src.external_url
+          });
+        }
+
+        const {data:newAp,error:iae}=await sb.from('apartments').insert(row).select().single();
+        if(iae)throw iae;
+        created++;
+
+        const rel=src.apartment_polygons;
+        const points=Array.isArray(rel)?rel[0]?.points||[]:rel?.points||[];
+        if(points.length>=3){
+          const {error:ipe}=await sb.from('apartment_polygons').insert({
+            apartment_id:newAp.id,
+            points:transformedPoints(points,extraFlipH,extraFlipV)
+          });
+          if(ipe)throw ipe;
+          mapped++;
+        }
+      }
+
+      results.push({
+        floor_id:targetFloor.id,
+        floor_name:targetFloor.name,
+        building_name:targetBuilding.name,
+        created,
+        mapped,
+        plan_flip_h:effectivePlanFlipH,
+        plan_flip_v:effectivePlanFlipV
+      });
+    }
+
+    res.json({source_floor_id:sourceFloorId,copy_mode:copyMode,targets:results});
+  }catch(e){send(res,null,e)}
+});
+
 const apartmentAllowed=['floor_id','code','title','status','rooms','usable_area_sqm','total_area_sqm','price','currency','description','model_node_name','image_path','external_url','settings'];
 app.post('/api/admin/apartments',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').insert(clean(req.body,apartmentAllowed)).select().single();send(res,data,error)});
 app.patch('/api/admin/apartments/:id',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').update(clean(req.body,apartmentAllowed)).eq('id',req.params.id).select().single();send(res,data,error)});

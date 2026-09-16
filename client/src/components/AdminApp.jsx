@@ -117,13 +117,246 @@ function Calibration({p,reload}){
     <div className="model-grid"><div className="panel preview-panel"><ThreeViewer buildings={[b]} selectedBuildingId={b.id}/></div><div className="panel settings-panel"><h3>{b.name}</h3><div className="form-grid one"><label>Înălțime reală clădire (m)<input type="number" step=".01" defaultValue={b.real_height_m||27} onBlur={e=>patchBuilding({real_height_m:+e.target.value})}/></label><label>Înălțime internă / display units<input type="number" step=".1" defaultValue={b.display_height_units||2.7} onBlur={e=>patchBuilding({display_height_units:+e.target.value})}/></label><label>Axa verticală<select defaultValue={b.model_up_axis||'Y'} onChange={e=>patchBuilding({model_up_axis:e.target.value})}><option>Y</option><option>Z</option><option>X</option></select></label><label className="check"><input type="checkbox" defaultChecked={b.auto_ground!==false} onChange={e=>patchBuilding({auto_ground:e.target.checked})}/> Așază baza modelului la cota 0</label></div><div className="notice">Scalare uniformă la runtime: <b>{b.real_height_m||27} m reali → {b.display_height_units||2.7} unități interne</b>.</div></div></div>
   </>
 }
-function Floors({p,reload}){const [bid,setBid]=useState(p.buildings?.[0]?.id);const b=p.buildings.find(x=>x.id===bid)||p.buildings[0];const [cfg,setCfg]=useState({count:b?.floors_count||9,standard:b?.default_floor_height_m||3,groundDifferent:b?.ground_floor_different||false,ground:b?.ground_floor_height_m||3});useEffect(()=>{if(b)setCfg({count:b.floors_count||9,standard:b.default_floor_height_m||3,groundDifferent:b.ground_floor_different||false,ground:b.ground_floor_height_m||3})},[bid]);if(!b)return null;async function generate(){if((b.floors||[]).some(f=>(f.apartments||[]).length)&&!confirm('Regenerarea etajelor va șterge apartamentele existente. Continui?'))return;await api(`/admin/buildings/${b.id}/generate-floors`,{method:'POST',body:cfg});reload()}return <><SectionHead kicker="04 · ETAJE" title="Etaje și intervale verticale" desc="Etajele sunt independente de structura mesh-urilor din GLB. Intervalele pot fi ajustate individual." actions={<select value={b.id} onChange={e=>setBid(e.target.value)}>{p.buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>}/><div className="floors-layout"><div className="panel floor-generator"><h3>Generator</h3><label>Număr etaje / niveluri<input type="number" min="1" value={cfg.count} onChange={e=>setCfg({...cfg,count:+e.target.value})}/></label><label>Înălțime standard (m)<input type="number" step=".1" value={cfg.standard} onChange={e=>setCfg({...cfg,standard:+e.target.value})}/></label><label className="check"><input type="checkbox" checked={cfg.groundDifferent} onChange={e=>setCfg({...cfg,groundDifferent:e.target.checked})}/> Parterul are înălțime diferită</label>{cfg.groundDifferent&&<label>Înălțime parter (m)<input type="number" step=".1" value={cfg.ground} onChange={e=>setCfg({...cfg,ground:+e.target.value})}/></label>}<button className="primary big" onClick={generate}>Generează etajele</button></div><div className="panel"><div className="table"><div className="tr th"><span>Nivel</span><span>De la (m)</span><span>Până la (m)</span><span>Plan</span></div>{(b.floors||[]).map(f=><div className="tr" key={f.id}><input defaultValue={f.name} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{name:e.target.value}}).then(reload)}/><input type="number" step=".1" defaultValue={f.height_from_m} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{height_from_m:+e.target.value}}).then(reload)}/><input type="number" step=".1" defaultValue={f.height_to_m} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{height_to_m:+e.target.value}}).then(reload)}/><span>{f.plan_path?'✓':'—'}</span></div>)}</div>{(b.floors||[]).length===0&&<div className="empty-mini">Generează structura de etaje.</div>}</div></div></>}
+
+function CopyFloorStructureModal({project,source,onClose,onDone}){
+  const targets=(project.buildings||[]).filter(b=>b.id!==source.id);
+  const [selected,setSelected]=useState(targets.map(b=>b.id));
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const allSelected=targets.length>0&&selected.length===targets.length;
+  function toggle(id){setSelected(v=>v.includes(id)?v.filter(x=>x!==id):[...v,id])}
+  async function apply(){
+    if(!selected.length)return setError('Selectează cel puțin un bloc țintă.');
+    if(!confirm(`Copiez structura de ${source.floors?.length||0} etaje din ${source.name} în ${selected.length} bloc(uri)? Nivelurile suplimentare din ținte vor fi șterse.`))return;
+    setBusy(true);setError('');
+    try{
+      await api(`/admin/buildings/${source.id}/copy-floor-structure`,{method:'POST',body:{target_building_ids:selected}});
+      await onDone?.();
+      onClose();
+    }catch(e){setError(e.message)}finally{setBusy(false)}
+  }
+  return <div className="modal"><div className="modal-card copy-modal">
+    <button className="x" onClick={onClose}>×</button>
+    <h2>Copiază structura etajelor</h2>
+    <p className="hint">Sursă: <b>{source.name}</b>. Se copiază numărul de niveluri, denumirile și intervalele verticale. Planurile și apartamentele de pe etajele care există deja nu se modifică. Nivelurile suplimentare din blocurile țintă vor fi eliminate.</p>
+    <div className="copy-actions-row"><button onClick={()=>setSelected(allSelected?[]:targets.map(b=>b.id))}>{allSelected?'Deselectează toate':'Selectează toate'}</button></div>
+    <div className="copy-check-list">
+      {targets.map(b=><label className="check copy-check" key={b.id}><input type="checkbox" checked={selected.includes(b.id)} onChange={()=>toggle(b.id)}/><span><b>{b.name}</b><small>{(b.floors||[]).length} etaje acum</small></span></label>)}
+    </div>
+    {error&&<div className="error-box">{error}</div>}
+    <button className="primary big" disabled={busy||!selected.length} onClick={apply}>{busy?'Copiez…':`Copiază în ${selected.length} bloc(uri)`}</button>
+  </div></div>
+}
+
+function CopyLayoutModal({project,sourceBuilding,sourceFloor,onClose,onDone}){
+  const allTargets=(project.buildings||[]).flatMap(b=>(b.floors||[]).filter(f=>f.id!==sourceFloor.id).map(f=>({...f,building:b})));
+  const sameBuildingTargets=allTargets.filter(x=>x.building.id===sourceBuilding.id);
+  const [selected,setSelected]=useState(sameBuildingTargets.map(x=>x.id));
+  const [copyMode,setCopyMode]=useState('rooms');
+  const [flipH,setFlipH]=useState(false),[flipV,setFlipV]=useState(false);
+  const [prefix,setPrefix]=useState('');
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  function toggle(id){setSelected(v=>v.includes(id)?v.filter(x=>x!==id):[...v,id])}
+  function selectGroup(items){setSelected(items.map(x=>x.id))}
+  async function apply(){
+    if(!selected.length)return setError('Selectează cel puțin un etaj țintă.');
+    const modeLabel=copyMode==='geometry'?'doar geometria':copyMode==='rooms'?'geometria + numărul de camere':'geometria + datele comerciale';
+    if(!confirm(`Copiez planul și maparea din ${sourceFloor.name} în ${selected.length} etaj(e), cu ${modeLabel}. Apartamentele existente de pe etajele țintă vor fi înlocuite cu apartamente noi.`))return;
+    setBusy(true);setError('');
+    try{
+      await api(`/admin/floors/${sourceFloor.id}/copy-layout`,{method:'POST',body:{
+        target_floor_ids:selected,
+        copy_mode:copyMode,
+        flip_h:flipH,
+        flip_v:flipV,
+        code_prefix:prefix
+      }});
+      await onDone?.();
+      onClose();
+    }catch(e){setError(e.message)}finally{setBusy(false)}
+  }
+  return <div className="modal"><div className="modal-card copy-modal copy-layout-modal">
+    <button className="x" onClick={onClose}>×</button>
+    <h2>Copiază planul + maparea</h2>
+    <p className="hint">Sursă: <b>{sourceBuilding.name} · {sourceFloor.name}</b>. Pe fiecare etaj țintă se creează <b>apartamente noi</b>, cu ID-uri și coduri noi. Statusul nu se copiază: noile apartamente sunt Disponibile.</p>
+
+    <div className="copy-quick">
+      <button onClick={()=>selectGroup(sameBuildingTargets)}>Toate din {sourceBuilding.name}</button>
+      <button onClick={()=>selectGroup(allTargets)}>Toate din proiect</button>
+      <button onClick={()=>setSelected([])}>Niciunul</button>
+    </div>
+
+    <div className="copy-target-groups">
+      {(project.buildings||[]).map(b=>{
+        const floors=(b.floors||[]).filter(f=>f.id!==sourceFloor.id);
+        if(!floors.length)return null;
+        return <div className="copy-target-group" key={b.id}>
+          <b>{b.name}</b>
+          {floors.map(f=><label className="check copy-check" key={f.id}>
+            <input type="checkbox" checked={selected.includes(f.id)} onChange={()=>toggle(f.id)}/>
+            <span><strong>{f.name}</strong><small>{(f.apartments||[]).length} apartamente · {f.plan_path?'are plan':'fără plan'}</small></span>
+          </label>)}
+        </div>
+      })}
+    </div>
+
+    <div className="copy-options-grid">
+      <label>Date apartamente
+        <select value={copyMode} onChange={e=>setCopyMode(e.target.value)}>
+          <option value="geometry">Doar geometrie / poligoane</option>
+          <option value="rooms">Geometrie + număr camere</option>
+          <option value="all">Geometrie + toate datele comerciale</option>
+        </select>
+      </label>
+      <label>Prefix coduri (opțional)
+        <input value={prefix} onChange={e=>setPrefix(e.target.value)} placeholder="automat; ex. B2-"/>
+      </label>
+      <label className="check"><input type="checkbox" checked={flipH} onChange={e=>setFlipH(e.target.checked)}/> Flip orizontal</label>
+      <label className="check"><input type="checkbox" checked={flipV} onChange={e=>setFlipV(e.target.checked)}/> Flip vertical</label>
+    </div>
+
+    <div className="copy-note">
+      <b>Coduri noi automat</b>
+      <span>Parter: P01, P02… · Etaj 1: 101, 102… · Etaj 2: 201, 202… La alt bloc se adaugă automat B2-, B3- etc., dacă nu introduci tu un prefix.</span>
+    </div>
+
+    {error&&<div className="error-box">{error}</div>}
+    <button className="primary big" disabled={busy||!selected.length} onClick={apply}>{busy?'Copiez…':`Copiază în ${selected.length} etaj(e)`}</button>
+  </div></div>
+}
+
+
+function CopyCompleteBuildingModal({project,source,onClose,onDone}){
+  const candidates=(project.buildings||[]).filter(b=>b.id!==source.id);
+  const [targets,setTargets]=useState(()=>candidates.map(b=>({building_id:b.id,enabled:true,orientation:'normal'})));
+  const [copyMode,setCopyMode]=useState('rooms');
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+
+  function patchTarget(id,patch){
+    setTargets(v=>v.map(t=>t.building_id===id?{...t,...patch}:t));
+  }
+  const enabled=targets.filter(t=>t.enabled);
+  const allEnabled=candidates.length>0&&enabled.length===candidates.length;
+
+  async function apply(){
+    if(!enabled.length)return setError('Selectează cel puțin un bloc țintă.');
+    const modeLabel=copyMode==='geometry'?'doar planurile și poligoanele':copyMode==='rooms'?'planurile, poligoanele și numărul de camere':'planurile, poligoanele și datele comerciale';
+    if(!confirm(`Copiez COMPLET structura și layouturile din ${source.name} în ${enabled.length} bloc(uri): ${modeLabel}. Planurile, apartamentele și mapările existente din blocurile țintă vor fi înlocuite.`))return;
+    setBusy(true);setError('');
+    try{
+      await api(`/admin/buildings/${source.id}/copy-complete-building-layout`,{method:'POST',body:{
+        copy_mode:copyMode,
+        targets:enabled.map(t=>({
+          building_id:t.building_id,
+          flip_h:t.orientation==='h'||t.orientation==='hv',
+          flip_v:t.orientation==='v'||t.orientation==='hv'
+        }))
+      }});
+      await onDone?.();
+      onClose();
+    }catch(e){setError(e.message)}finally{setBusy(false)}
+  }
+
+  return <div className="modal"><div className="modal-card copy-modal copy-building-modal">
+    <button className="x" onClick={onClose}>×</button>
+    <h2>Copiază blocul complet</h2>
+    <p className="hint">Sursă: <b>{source.name}</b>. Se copiază dintr-un foc structura etajelor, planul fiecărui etaj și maparea apartamentelor. În blocurile țintă se creează întotdeauna <b>apartamente noi</b>, cu ID-uri, coduri și denumiri noi; statusul pornește Disponibil.</p>
+
+    <label>Date preluate de la apartamente
+      <select value={copyMode} onChange={e=>setCopyMode(e.target.value)}>
+        <option value="geometry">Doar geometrie / poligoane</option>
+        <option value="rooms">Geometrie + număr camere</option>
+        <option value="all">Geometrie + toate datele comerciale</option>
+      </select>
+    </label>
+
+    <div className="copy-actions-row">
+      <button onClick={()=>setTargets(v=>v.map(t=>({...t,enabled:!allEnabled})))}>{allEnabled?'Deselectează toate':'Selectează toate'}</button>
+    </div>
+
+    <div className="complete-building-targets">
+      {candidates.map(b=>{
+        const cfg=targets.find(t=>t.building_id===b.id)||{enabled:false,orientation:'normal'};
+        return <div className={'complete-building-target '+(cfg.enabled?'enabled':'')} key={b.id}>
+          <label className="check">
+            <input type="checkbox" checked={cfg.enabled} onChange={e=>patchTarget(b.id,{enabled:e.target.checked})}/>
+            <span><b>{b.name}</b><small>{(b.floors||[]).length} etaje acum</small></span>
+          </label>
+          <label>Orientare
+            <select disabled={!cfg.enabled} value={cfg.orientation} onChange={e=>patchTarget(b.id,{orientation:e.target.value})}>
+              <option value="normal">Normal</option>
+              <option value="h">Flip H</option>
+              <option value="v">Flip V</option>
+              <option value="hv">Flip H + V</option>
+            </select>
+          </label>
+        </div>
+      })}
+    </div>
+
+    <div className="copy-note">
+      <b>Ce NU se copiază</b>
+      <span>ID-urile, codurile, denumirile și statusurile apartamentelor. Codurile sunt regenerate automat pentru blocul și etajul destinație.</span>
+    </div>
+    {error&&<div className="error-box">{error}</div>}
+    <button className="primary big" disabled={busy||!enabled.length} onClick={apply}>{busy?'Copiez blocurile…':`Copiază complet în ${enabled.length} bloc(uri)`}</button>
+  </div></div>
+}
+
+function Floors({p,reload}){
+  const [bid,setBid]=useState(p.buildings?.[0]?.id);
+  const b=p.buildings.find(x=>x.id===bid)||p.buildings[0];
+  const [copyOpen,setCopyOpen]=useState(false),[copyCompleteOpen,setCopyCompleteOpen]=useState(false);
+  const [cfg,setCfg]=useState({count:b?.floors_count||9,standard:b?.default_floor_height_m||3,groundDifferent:b?.ground_floor_different||false,ground:b?.ground_floor_height_m||3});
+  useEffect(()=>{if(b)setCfg({count:b.floors_count||9,standard:b.default_floor_height_m||3,groundDifferent:b.ground_floor_different||false,ground:b.ground_floor_height_m||3})},[bid,p]);
+  if(!b)return null;
+  async function generate(){
+    if((b.floors||[]).some(f=>(f.apartments||[]).length)&&!confirm('Regenerarea etajelor va șterge apartamentele existente. Continui?'))return;
+    await api(`/admin/buildings/${b.id}/generate-floors`,{method:'POST',body:cfg});
+    reload();
+  }
+  return <>
+    <SectionHead
+      kicker="04 · ETAJE"
+      title="Etaje și intervale verticale"
+      desc="Etajele sunt independente de structura mesh-urilor din GLB. Intervalele pot fi ajustate individual."
+      actions={<div className="inline-selects">
+        <select value={b.id} onChange={e=>setBid(e.target.value)}>{p.buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
+        {(p.buildings||[]).length>1&&<button onClick={()=>setCopyOpen(true)}>Copiază doar structura</button>}
+        {(p.buildings||[]).length>1&&<button className="primary" onClick={()=>setCopyCompleteOpen(true)}>Copiază blocul complet</button>}
+      </div>}
+    />
+    <div className="floors-layout">
+      <div className="panel floor-generator">
+        <h3>Generator</h3>
+        <label>Număr etaje / niveluri<input type="number" min="1" value={cfg.count} onChange={e=>setCfg({...cfg,count:+e.target.value})}/></label>
+        <label>Înălțime standard (m)<input type="number" step=".1" value={cfg.standard} onChange={e=>setCfg({...cfg,standard:+e.target.value})}/></label>
+        <label className="check"><input type="checkbox" checked={cfg.groundDifferent} onChange={e=>setCfg({...cfg,groundDifferent:e.target.checked})}/> Parterul are înălțime diferită</label>
+        {cfg.groundDifferent&&<label>Înălțime parter (m)<input type="number" step=".1" value={cfg.ground} onChange={e=>setCfg({...cfg,ground:+e.target.value})}/></label>}
+        <button className="primary big" onClick={generate}>Generează etajele</button>
+      </div>
+      <div className="panel">
+        <div className="table">
+          <div className="tr th"><span>Nivel</span><span>De la (m)</span><span>Până la (m)</span><span>Plan</span></div>
+          {(b.floors||[]).map(f=><div className="tr" key={f.id}>
+            <input defaultValue={f.name} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{name:e.target.value}}).then(reload)}/>
+            <input type="number" step=".1" defaultValue={f.height_from_m} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{height_from_m:+e.target.value}}).then(reload)}/>
+            <input type="number" step=".1" defaultValue={f.height_to_m} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{height_to_m:+e.target.value}}).then(reload)}/>
+            <span>{f.plan_path?'✓':'—'}</span>
+          </div>)}
+        </div>
+        {(b.floors||[]).length===0&&<div className="empty-mini">Generează structura de etaje.</div>}
+      </div>
+    </div>
+    {copyOpen&&<CopyFloorStructureModal project={p} source={b} onClose={()=>setCopyOpen(false)} onDone={reload}/>}
+    {copyCompleteOpen&&<CopyCompleteBuildingModal project={p} source={b} onClose={()=>setCopyCompleteOpen(false)} onDone={reload}/>}
+  </>
+}
 function ApartmentForm({project,floor,apartment,onSaved,onCancel}){const [f,setF]=useState(apartment||{code:'',title:'',status:'available',rooms:'',usable_area_sqm:'',total_area_sqm:'',price:'',currency:'EUR',description:'',external_url:''});const [imageFile,setImageFile]=useState(null);async function save(){const body={...f,floor_id:floor.id,rooms:f.rooms?+f.rooms:null,usable_area_sqm:f.usable_area_sqm?+f.usable_area_sqm:null,total_area_sqm:f.total_area_sqm?+f.total_area_sqm:null,price:f.price?+f.price:null};let saved=apartment;if(apartment)saved=await api(`/admin/apartments/${apartment.id}`,{method:'PATCH',body});else saved=await api('/admin/apartments',{method:'POST',body});if(imageFile&&saved?.id){const fd=new FormData();fd.append('file',imageFile);fd.append('project_id',project.id);fd.append('floor_id',floor.id);fd.append('apartment_id',saved.id);fd.append('asset_type','apartment-image');const u=await api('/admin/upload/apartment-images',{method:'POST',body:fd});await api(`/admin/apartments/${saved.id}`,{method:'PATCH',body:{image_path:u.url}})}onSaved()}return <div className="drawer"><div className="drawer-card"><button className="x" onClick={onCancel}>×</button><h2>{apartment?'Editează':'Apartament nou'}</h2>{(apartment?.image_path||f.image_path)&&<img className="apartment-form-image" src={apartment?.image_path||f.image_path}/>}<label className="button-file image-upload"><input type="file" accept="image/*" onChange={e=>setImageFile(e.target.files[0]||null)}/>{imageFile?`Imagine selectată: ${imageFile.name}`:'Încarcă imagine apartament'}</label><div className="form-grid"><label>Cod<input value={f.code} onChange={e=>setF({...f,code:e.target.value})}/></label><label>Status<select value={f.status} onChange={e=>setF({...f,status:e.target.value})}><option value="available">Disponibil</option><option value="reserved">Rezervat</option><option value="sold">Vândut</option></select></label><label className="wide">Titlu<input value={f.title||''} onChange={e=>setF({...f,title:e.target.value})}/></label><label>Camere<input type="number" value={f.rooms||''} onChange={e=>setF({...f,rooms:e.target.value})}/></label><label>Suprafață utilă<input type="number" step=".01" value={f.usable_area_sqm||''} onChange={e=>setF({...f,usable_area_sqm:e.target.value})}/></label><label>Suprafață totală<input type="number" step=".01" value={f.total_area_sqm||''} onChange={e=>setF({...f,total_area_sqm:e.target.value})}/></label><label>Preț<input type="number" value={f.price||''} onChange={e=>setF({...f,price:e.target.value})}/></label><label>Monedă<input value={f.currency||'EUR'} onChange={e=>setF({...f,currency:e.target.value})}/></label><label className="wide">URL apartament<input value={f.external_url||''} onChange={e=>setF({...f,external_url:e.target.value})}/></label><label className="wide">Descriere<textarea rows="4" value={f.description||''} onChange={e=>setF({...f,description:e.target.value})}/></label></div><button className="primary big" onClick={save}>Salvează apartamentul</button></div></div>}
 function Plans({p,reload}){
   const [bid,setBid]=useState(p.buildings?.[0]?.id);
   const b=p.buildings.find(x=>x.id===bid)||p.buildings[0];
   const [fid,setFid]=useState(b?.floors?.[0]?.id);
-  const [edit,setEdit]=useState(null),[newOpen,setNewOpen]=useState(false),[autoOpen,setAutoOpen]=useState(false);
+  const [edit,setEdit]=useState(null),[newOpen,setNewOpen]=useState(false),[autoOpen,setAutoOpen]=useState(false),[copyLayoutOpen,setCopyLayoutOpen]=useState(false);
 
   useEffect(()=>{
     if(!b?.floors?.find(x=>x.id===fid))setFid(b?.floors?.[0]?.id)
@@ -164,6 +397,7 @@ function Plans({p,reload}){
             {f.plan_path?'Înlocuiește planul':'Încarcă planul'}
           </label>
           {f.plan_path&&<button className="auto-detect-btn" onClick={()=>setAutoOpen(true)}>✦ Detectează apartamente</button>}
+          {f.plan_path&&(f.apartments||[]).length>0&&<button onClick={()=>setCopyLayoutOpen(true)}>Copiază plan + mapare</button>}
           <button className="primary" onClick={()=>setNewOpen(true)}>＋ Apartament</button>
         </div>
       </div>
@@ -187,6 +421,7 @@ function Plans({p,reload}){
       <PlanEditor floor={f} onChanged={reload}/>
 
       {autoOpen&&<AutoApartmentDetector floor={f} onClose={()=>setAutoOpen(false)} onCommitted={reload}/>}
+      {copyLayoutOpen&&<CopyLayoutModal project={p} sourceBuilding={b} sourceFloor={f} onClose={()=>setCopyLayoutOpen(false)} onDone={reload}/>}
       {(newOpen||edit)&&<ApartmentForm project={p} floor={f} apartment={edit} onSaved={()=>{setEdit(null);setNewOpen(false);reload()}} onCancel={()=>{setEdit(null);setNewOpen(false)}}/>}
     </>}
   </>

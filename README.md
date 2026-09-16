@@ -1,3 +1,85 @@
+# Estate Studio — Build 04.4.19 Copy Complete Building
+
+Build cumulativ peste 04.4.18. Nu schimbă editorul de poligoane, detectorul PNG, viewerul 3D sau frontend-ul existent.
+
+## Nou: Copiază blocul complet
+În secțiunea **Etaje**, pe blocul sursă apare acțiunea **Copiază blocul complet**.
+
+Pentru fiecare bloc țintă selectat, operația face automat:
+- sincronizarea structurii tuturor etajelor după blocul sursă;
+- copierea planului pentru fiecare etaj corespondent;
+- copierea tuturor poligoanelor/mapării de pe fiecare etaj;
+- crearea de apartamente NOI în fiecare țintă;
+- ID-uri noi;
+- coduri noi generate pentru bloc + etaj;
+- denumiri noi `Apartament <cod>`;
+- status nou `available` indiferent de statusul sursei.
+
+### Date apartamente
+Modalul permite:
+- **Doar geometrie / poligoane**;
+- **Geometrie + număr camere** — implicit;
+- **Geometrie + toate datele comerciale**.
+
+Identitatea și statusul nu se copiază în niciun mod.
+
+### Orientare per bloc
+Fiecare bloc țintă poate avea separat:
+- Normal;
+- Flip H;
+- Flip V;
+- Flip H + V.
+
+Orientarea se aplică tuturor planurilor și poligoanelor copiate în acel bloc, păstrând coerența între PNG și mapping.
+
+Funcțiile existente **Copiază doar structura** și **Copiază plan + mapare** pe etaje individuale rămân disponibile pentru excepții.
+
+`/api/version` => `04.4.19-copy-complete-building`
+
+# Estate Studio — Build 04.4.18 Cross-copy Floors & Layouts
+
+Build cumulativ peste 04.4.17. Funcțiile existente de mapping/editare rămân păstrate.
+
+## 1. Etaje — copiere structură între blocuri
+În secțiunea **Etaje**, blocul selectat poate fi folosit ca sursă pentru unul sau mai multe blocuri țintă.
+
+Se copiază:
+- numărul de niveluri;
+- denumirile etajelor;
+- `floor_number` / `sort_order`;
+- intervalele `height_from_m` / `height_to_m`;
+- configurația de înălțimi a blocului.
+
+Pe etajele țintă care există deja, planurile și apartamentele sunt păstrate. Nivelurile suplimentare față de sursă sunt eliminate.
+
+## 2. Planuri & apartamente — copiere plan + mapare în mai multe etaje
+Din etajul curent:
+- selectezi unul sau mai multe etaje țintă din același proiect;
+- planul este reutilizat;
+- poligoanele sunt copiate;
+- pe fiecare etaj țintă se generează **apartamente noi**;
+- ID-urile sunt întotdeauna noi;
+- codurile și titlurile sunt întotdeauna noi;
+- statusul NU se copiază: noile apartamente sunt `available`.
+
+Moduri pentru date:
+- **Doar geometrie / poligoane**;
+- **Geometrie + număr camere** (implicit);
+- **Geometrie + toate datele comerciale** (camere, suprafețe, preț, monedă, descriere, imagine, URL), fără identitate și fără status.
+
+Codurile se generează automat:
+- Parter: `P01`, `P02`...
+- Etaj 1: `101`, `102`...
+- Etaj 2: `201`, `202`...
+- dacă destinația este în alt bloc: `B2-101`, `B3-201` etc.;
+- există și prefix custom opțional.
+
+## Flip
+Copierea layoutului poate aplica **Flip H**, **Flip V** sau ambele.
+PlanEditor, frontend-ul public și detectorul PNG respectă flip-ul planului, iar poligoanele sunt transformate în aceleași coordonate.
+
+`/api/version` => `04.4.18-cross-copy-floors-layouts`
+
 # Estate Studio — Build 04.4.17 Copy / Flip / Paste & Move
 
 Update peste 04.4.16.

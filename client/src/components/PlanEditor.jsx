@@ -225,6 +225,8 @@ export default function PlanEditor({floor,onChanged}){
   const [moveWhole,setMoveWhole]=useState(false);
 
   const selected=(floor?.apartments||[]).find(a=>a.id===selectedId);
+  const planFlipH=!!floor?.settings?.plan_flip_h;
+  const planFlipV=!!floor?.settings?.plan_flip_v;
 
   useEffect(()=>{draftRef.current=draft},[draft]);
 
@@ -801,7 +803,16 @@ export default function PlanEditor({floor,onChanged}){
                 draggable={false}
               >
                 <Rect width={size.w} height={size.h} fill="#e9edea" listening={false}/>
-                {image&&<KImage image={image} x={imgRect.x} y={imgRect.y} width={imgRect.w} height={imgRect.h} listening={false}/>} 
+                {image&&<KImage
+                  image={image}
+                  x={planFlipH?imgRect.x+imgRect.w:imgRect.x}
+                  y={planFlipV?imgRect.y+imgRect.h:imgRect.y}
+                  width={imgRect.w}
+                  height={imgRect.h}
+                  scaleX={planFlipH?-1:1}
+                  scaleY={planFlipV?-1:1}
+                  listening={false}
+                />} 
 
                 {(floor?.apartments||[]).filter(a=>a.id!==selectedId).map(a=>{
                   const ps=polygonPoints(a);
