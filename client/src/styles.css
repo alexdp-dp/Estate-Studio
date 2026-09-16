@@ -1792,3 +1792,42 @@ h1,h2,h3,h4,h5,h6,b,strong,
 .segmented .segment-danger:disabled{
   opacity:.38;
 }
+
+
+/* 04.4.31 — delete buttons use the SAME button system as the rest of Estate Studio */
+button.ui-action.destructive-plan-action{
+  min-height:38px;
+  padding:9px 13px;
+  border:1px solid #e2bcbc !important;
+  border-radius:10px;
+  background:#fff !important;
+  color:#a52d2d !important;
+  font-weight:700;
+  line-height:1;
+  box-shadow:0 1px 1px #10151205;
+}
+button.ui-action.destructive-plan-action:hover{
+  background:#fff2f2 !important;
+  border-color:#d38f8f !important;
+  color:#8f2424 !important;
+  box-shadow:0 4px 12px rgba(165,45,45,.08);
+}
+button.ui-action.destructive-plan-action:active{
+  transform:translateY(1px);
+}
+
+/* Polygon delete stays inside the segmented control and follows its geometry exactly. */
+.segmented button.segment-danger{
+  border:1px solid transparent;
+  border-radius:7px;
+  padding:8px 10px;
+  background:transparent;
+  color:#a52d2d;
+  font-size:12px;
+  font-weight:700;
+}
+.segmented button.segment-danger:hover:not(:disabled){
+  background:#fff0f0;
+  border-color:#efcaca;
+  color:#8f2424;
+}

@@ -536,8 +536,8 @@ function Plans({p,reload}){
           {f.plan_path&&<button className="ui-action" onClick={()=>setAutoOpen(true)}>✦ Detectează apartamente</button>}
           {f.plan_path&&(f.apartments||[]).length>0&&<button className="ui-action" onClick={()=>setCopyLayoutOpen(true)}>Copiază plan + mapare</button>}
           <button className="primary" onClick={()=>setNewOpen(true)}>＋ Apartament</button>
-          {(f.plan_path||(f.apartments||[]).length>0)&&<button className="danger-ghost destructive-plan-action" onClick={deleteCurrentFloorPlanData}>Șterge plan etaj</button>}
-          {(p.buildings||[]).some(bb=>(bb.floors||[]).some(ff=>ff.plan_path||(ff.apartments||[]).length>0))&&<button className="danger-ghost destructive-plan-action" onClick={deleteAllProjectPlanData}>Șterge toate planurile</button>}
+          {(f.plan_path||(f.apartments||[]).length>0)&&<button className="ui-action destructive-plan-action" onClick={deleteCurrentFloorPlanData}>Șterge plan etaj</button>}
+          {(p.buildings||[]).some(bb=>(bb.floors||[]).some(ff=>ff.plan_path||(ff.apartments||[]).length>0))&&<button className="ui-action destructive-plan-action" onClick={deleteAllProjectPlanData}>Șterge toate planurile</button>}
         </div>
       </div>
 

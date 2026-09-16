@@ -1,3 +1,17 @@
+# Estate Studio — Build 04.4.31 Delete Buttons CSS Fix
+
+Hotfix vizual peste 04.4.30. Nu schimbă logica de ștergere.
+
+## Fix
+- `Șterge plan etaj` și `Șterge toate planurile` folosesc acum exact același sistem CSS `ui-action` ca celelalte butoane din pagina Planuri & apartamente;
+- aceeași înălțime, padding, border-radius, font-weight și hover;
+- diferența este doar paleta danger: text/border roșu discret;
+- `Șterge poligon` păstrează forma corectă din segmented control și are doar accent danger.
+
+Confirmările `SIGUR` și confirmarea Da/Nu pentru poligon rămân neschimbate.
+
+`/api/version` => `04.4.31-delete-buttons-css-fix`
+
 # Estate Studio — Build 04.4.30 Delete Plan Data + Polygon
 
 Build cumulativ peste 04.4.29.
