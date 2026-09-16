@@ -1732,3 +1732,63 @@ h1,h2,h3,h4,h5,h6,b,strong,
     }
   }
 }
+
+
+/* 04.4.30 — destructive plan-data actions */
+.destructive-plan-action{
+  border-color:#e7bcbc !important;
+  color:#a52d2d !important;
+}
+.destructive-plan-action:hover{
+  background:#fff1f1 !important;
+  border-color:#d99393 !important;
+}
+
+/* Typed double-confirm dialog */
+.site-typed-confirm .typed-confirm-label{
+  display:grid;
+  gap:7px;
+  margin-top:18px;
+  color:#4d5b54;
+  font-size:12px;
+  font-weight:600;
+}
+.site-typed-confirm .typed-confirm-label b{
+  color:#b73737;
+  letter-spacing:.12em;
+}
+.site-typed-confirm .typed-confirm-input{
+  width:100%;
+  height:44px;
+  border:1px solid #d9dfdc;
+  border-radius:10px;
+  padding:0 12px;
+  background:#fbfcfb;
+  color:#152019;
+  font-size:15px;
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  outline:none;
+}
+.site-typed-confirm .typed-confirm-input:focus{
+  border-color:#b73737;
+  box-shadow:0 0 0 3px rgba(183,55,55,.09);
+}
+.site-confirm-ok:disabled,
+.ui-danger:disabled{
+  opacity:.35;
+  cursor:not-allowed;
+}
+
+/* Polygon-only destructive action in the mode segmented control */
+.segmented .segment-danger{
+  color:#a52d2d;
+}
+.segmented .segment-danger:hover:not(:disabled){
+  background:#fff0f0;
+  color:#922525;
+}
+.segmented .segment-danger:disabled{
+  opacity:.38;
+}

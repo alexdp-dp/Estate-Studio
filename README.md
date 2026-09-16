@@ -1,3 +1,38 @@
+# Estate Studio — Build 04.4.30 Delete Plan Data + Polygon
+
+Build cumulativ peste 04.4.29.
+
+## Planuri & apartamente — ștergere definitivă
+În pagina `Planuri & apartamente` există două acțiuni noi:
+
+### Șterge plan etaj
+Șterge pentru etajul activ:
+- referința către planul PNG;
+- dimensiunile planului;
+- toate apartamentele etajului;
+- toate poligoanele;
+- toate datele comerciale din acele apartamente;
+- metadatele de flip/layout-copy ale planului.
+
+Etajul ca structură rămâne.
+
+### Șterge toate planurile
+Rulează aceeași curățare pentru toate etajele din toate blocurile proiectului.
+Blocurile și structura etajelor rămân.
+
+Ambele sunt protejate prin confirmare de tip double opt-in: după apăsarea butonului apare un popup branded în care trebuie introdus exact `SIGUR`; butonul final este dezactivat până atunci.
+
+## Editor poligoane
+Lângă `Editează` și `Desenează nou` există acum `Șterge poligon`.
+
+- șterge exclusiv poligonul apartamentului selectat;
+- NU șterge apartamentul;
+- NU șterge datele comerciale;
+- folosește confirmare simplă `Nu / Da, șterge poligonul`;
+- după ștergere editorul se golește și datele sunt reîncărcate.
+
+`/api/version` => `04.4.30-delete-plan-data-polygon`
+
 # Estate Studio — Build 04.4.29 Project Back Runtime Fix
 
 Hotfix peste 04.4.28.

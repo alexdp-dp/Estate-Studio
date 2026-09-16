@@ -190,6 +190,51 @@ function transformCopiedPolygon(points,{flipH=false,flipV=false}={}){
   }));
 }
 
+function editorConfirm({
+  title='Confirmare',
+  message='Ești sigur?',
+  confirmLabel='Da, șterge'
+}={}){
+  return new Promise(resolve=>{
+    const overlay=document.createElement('div');
+    overlay.className='site-confirm-backdrop';
+    overlay.innerHTML=`
+      <div class="site-confirm-card" role="dialog" aria-modal="true">
+        <button type="button" class="site-confirm-x" aria-label="Închide">×</button>
+        <div class="site-confirm-icon danger">!</div>
+        <small>ESTATE STUDIO</small>
+        <h3></h3>
+        <p></p>
+        <div class="site-confirm-actions">
+          <button type="button" class="ui-action site-confirm-cancel">Nu</button>
+          <button type="button" class="ui-danger site-confirm-ok"></button>
+        </div>
+      </div>`;
+    overlay.querySelector('h3').textContent=title;
+    overlay.querySelector('p').textContent=message;
+    overlay.querySelector('.site-confirm-ok').textContent=confirmLabel;
+    let closed=false;
+    const finish=value=>{
+      if(closed)return;
+      closed=true;
+      document.removeEventListener('keydown',onKey);
+      overlay.remove();
+      resolve(value);
+    };
+    const onKey=e=>{
+      if(e.key==='Escape')finish(false);
+      if(e.key==='Enter')finish(true);
+    };
+    overlay.querySelector('.site-confirm-x').onclick=()=>finish(false);
+    overlay.querySelector('.site-confirm-cancel').onclick=()=>finish(false);
+    overlay.querySelector('.site-confirm-ok').onclick=()=>finish(true);
+    overlay.addEventListener('mousedown',e=>{if(e.target===overlay)finish(false)});
+    document.addEventListener('keydown',onKey);
+    document.body.appendChild(overlay);
+    requestAnimationFrame(()=>overlay.classList.add('visible'));
+  });
+}
+
 export default function PlanEditor({floor,onChanged}){
   const holder=useRef();
   const stageRef=useRef();
@@ -553,6 +598,38 @@ export default function PlanEditor({floor,onChanged}){
     });
   }
 
+  async function deleteSelectedPolygon(){
+    if(!selected){setNotice('Selectează un apartament.');return;}
+    const hasPolygon=draftRef.current.length>=3 || polygonPoints(selected).length>=3;
+    if(!hasPolygon){setNotice('Apartamentul selectat nu are poligon.');return;}
+
+    const ok=await editorConfirm({
+      title:`Șterge poligonul ${selected.code}`,
+      message:'Se șterge doar maparea/poligonul acestui apartament. Apartamentul și datele lui comerciale rămân.',
+      confirmLabel:'Da, șterge poligonul'
+    });
+    if(!ok)return;
+
+    setBusy(true);
+    try{
+      await api(`/admin/apartments/${selected.id}/polygon`,{method:'DELETE'});
+      draftRef.current=[];
+      undoRef.current=[];
+      setDraft([]);
+      setUndoCount(0);
+      setSelectedVertex(null);
+      setSelectedEdge(null);
+      setHoverEdge(null);
+      setMoveWhole(false);
+      setNotice('Poligon șters');
+      await onChanged?.();
+    }catch(e){
+      setNotice(`Eroare la ștergere: ${e.message}`);
+    }finally{
+      setBusy(false);
+    }
+  }
+
   async function savePolygon(){
     if(!selected){setNotice('Selectează un apartament.');return;}
     if(draftRef.current.length<3){setNotice('Poligonul are nevoie de cel puțin 3 puncte.');return;}
@@ -737,6 +814,11 @@ export default function PlanEditor({floor,onChanged}){
             if(draftRef.current.length)recordUndo(draftRef.current);
             setMode('draw');draftRef.current=[];setDraft([]);setSelectedVertex(null);setSelectedEdge(null);
           }}>Desenează nou</button>
+          <button
+            className="segment-danger"
+            disabled={busy||!selected||(draft.length<3&&polygonPoints(selected).length<3)}
+            onClick={deleteSelectedPolygon}
+          >Șterge poligon</button>
         </div>
 
         <div className="segmented snap-controls">

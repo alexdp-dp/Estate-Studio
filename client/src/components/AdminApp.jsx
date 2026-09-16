@@ -58,6 +58,66 @@ function siteConfirm({
   });
 }
 
+function siteTypedConfirm({
+  title='Confirmare definitivă',
+  message='Această acțiune șterge date.',
+  keyword='SIGUR',
+  confirmLabel='Șterge definitiv'
+}={}){
+  return new Promise(resolve=>{
+    const overlay=document.createElement('div');
+    overlay.className='site-confirm-backdrop';
+    overlay.innerHTML=`
+      <div class="site-confirm-card site-typed-confirm" role="dialog" aria-modal="true">
+        <button type="button" class="site-confirm-x" aria-label="Închide">×</button>
+        <div class="site-confirm-icon danger">!</div>
+        <small>ESTATE STUDIO · ACȚIUNE IREVERSIBILĂ</small>
+        <h3></h3>
+        <p></p>
+        <label class="typed-confirm-label">
+          Scrie <b></b> pentru confirmare
+          <input class="typed-confirm-input" autocomplete="off" spellcheck="false"/>
+        </label>
+        <div class="site-confirm-actions">
+          <button type="button" class="ui-action site-confirm-cancel">Renunță</button>
+          <button type="button" class="ui-danger site-confirm-ok" disabled></button>
+        </div>
+      </div>`;
+    overlay.querySelector('h3').textContent=title;
+    overlay.querySelector('p').textContent=message;
+    overlay.querySelector('.typed-confirm-label b').textContent=keyword;
+    const input=overlay.querySelector('.typed-confirm-input');
+    const ok=overlay.querySelector('.site-confirm-ok');
+    ok.textContent=confirmLabel;
+
+    let closed=false;
+    const finish=value=>{
+      if(closed)return;
+      closed=true;
+      document.removeEventListener('keydown',onKey);
+      overlay.remove();
+      resolve(value);
+    };
+    const refresh=()=>{ok.disabled=input.value!==keyword};
+    const onKey=e=>{
+      if(e.key==='Escape')finish(false);
+      if(e.key==='Enter'&&!ok.disabled)finish(true);
+    };
+    input.addEventListener('input',refresh);
+    overlay.querySelector('.site-confirm-x').onclick=()=>finish(false);
+    overlay.querySelector('.site-confirm-cancel').onclick=()=>finish(false);
+    ok.onclick=()=>{if(!ok.disabled)finish(true)};
+    overlay.addEventListener('mousedown',e=>{if(e.target===overlay)finish(false)});
+    document.addEventListener('keydown',onKey);
+    document.body.appendChild(overlay);
+    requestAnimationFrame(()=>{
+      overlay.classList.add('visible');
+      input.focus();
+    });
+  });
+}
+
+
 function Login({onLogin}){const [username,setUsername]=useState('alexdarie'),[password,setPassword]=useState(''),[err,setErr]=useState('');const submit=async e=>{e.preventDefault();setErr('');try{await api('/auth/login',{method:'POST',body:{username,password}});onLogin()}catch(e){setErr(e.message)}};return <div className="login-page"><form onSubmit={submit} className="login-card"><div className="logo-mark">ES</div><h1>Estate Studio</h1><p>Platformă de configurare pentru experiențe imobiliare 3D.</p><label>Utilizator<input value={username} onChange={e=>setUsername(e.target.value)}/></label><label>Parolă<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button className="primary big">Autentificare</button>{err&&<div className="error-box">{err}</div>}</form></div>}
 function Shell({children}){const nav=useNavigate();return <div className="app-shell"><aside className="main-sidebar"><Link className="brand" to="/admin/projects"><span>ES</span><div><b>Estate Studio</b><small>Configurator 3D</small></div></Link><nav><Link to="/admin/projects">▦ Proiecte</Link></nav><div className="sidebar-foot"><button onClick={async()=>{await api('/auth/logout',{method:'POST'});location.reload()}}>Ieșire</button></div></aside><div className="shell-main">{children}</div></div>}
 function Projects(){const [items,setItems]=useState([]),[show,setShow]=useState(false),[name,setName]=useState(''),[slug,setSlug]=useState(''),[loadError,setLoadError]=useState('');const nav=useNavigate();const load=()=>{setLoadError('');return api('/admin/projects').then(setItems).catch(e=>{setLoadError(e.message);setItems([])})};useEffect(()=>{load()},[]);async function create(e){e.preventDefault();const p=await api('/admin/projects',{method:'POST',body:{name,slug:slug||slugify(name)}});nav(`/admin/projects/${p.id}/general`)}return <Shell><header className="topbar"><div><small>ESTATE STUDIO</small><h1>Proiecte</h1><p>Fiecare proiect are date, modele, planuri și iframe propriu.</p></div><button className="primary" onClick={()=>setShow(true)}>＋ Proiect nou</button></header><div className="content">{loadError&&<div className="error-box" style={{marginBottom:16}}>{loadError}</div>}<div className="project-grid">{items.map(p=><article className="project-card" key={p.id}><div className="project-cover" style={p.settings?.hero_url?{backgroundImage:`linear-gradient(#0b120f33,#0b120f33),url(${p.settings.hero_url})`,backgroundSize:'cover',backgroundPosition:'center'}:{}}><span>{p.settings?.hero_url?'':p.name.slice(0,2).toUpperCase()}</span><i className={p.is_published?'live':'draft'}>{p.is_published?'Publicat':'Draft'}</i></div><div className="project-body"><small>/{p.slug}</small><h3>{p.name}</h3><p>{p.building_count||0} blocuri · {p.floor_count||0} etaje · {p.apartment_count||0} apartamente</p><div className="card-actions"><button className="primary" onClick={()=>nav(`/admin/projects/${p.id}/general`)}>Deschide</button><button onClick={async()=>{if(await siteConfirm({title:'Duplică proiectul',message:`Va fi creată o copie nouă pentru ${p.name}.`,confirmLabel:'Duplică'})){await api(`/admin/projects/${p.id}/duplicate`,{method:'POST'});load()}}}>Duplică</button><button className="danger-ghost" onClick={async()=>{if(await siteConfirm({title:'Șterge proiectul',message:`${p.name} va fi șters definitiv, împreună cu datele lui.`,confirmLabel:'Șterge definitiv',danger:true})){await api(`/admin/projects/${p.id}`,{method:'DELETE'});load()}}}>Șterge</button></div></div></article>)}{items.length===0&&<div className="empty-state"><b>Niciun proiect încă</b><span>Creează primul proiect și configurează-i modelul 3D.</span><button className="primary" onClick={()=>setShow(true)}>Creează proiect</button></div>}</div></div>{show&&<div className="modal"><form className="modal-card" onSubmit={create}><button type="button" className="x" onClick={()=>setShow(false)}>×</button><h2>Proiect nou</h2><label>Nume proiect<input autoFocus value={name} onChange={e=>{setName(e.target.value);setSlug(slugify(e.target.value))}} required/></label><label>Slug iframe<input value={slug} onChange={e=>setSlug(slugify(e.target.value))} required/></label><button className="primary big">Creează proiectul</button></form></div>}</Shell>}
@@ -428,6 +488,32 @@ function Plans({p,reload}){
     reload();
   }
 
+  async function deleteCurrentFloorPlanData(){
+    const ok=await siteTypedConfirm({
+      title:`Șterge planul ${f.name}`,
+      message:`Se vor șterge planul activ, toate apartamentele de pe ${f.name}, toate poligoanele și toate informațiile comerciale asociate. Etajul ca structură rămâne.`,
+      keyword:'SIGUR',
+      confirmLabel:'Șterge planul etajului'
+    });
+    if(!ok)return;
+    await api(`/admin/floors/${f.id}/plan-data`,{method:'DELETE'});
+    setEdit(null);setNewOpen(false);setAutoOpen(false);setCopyLayoutOpen(false);
+    await reload();
+  }
+
+  async function deleteAllProjectPlanData(){
+    const ok=await siteTypedConfirm({
+      title:'Șterge toate planurile',
+      message:`Se vor șterge TOATE planurile din proiectul ${p.name}, toate apartamentele, poligoanele și toate informațiile comerciale asociate. Blocurile și structura etajelor rămân.`,
+      keyword:'SIGUR',
+      confirmLabel:'Șterge toate planurile'
+    });
+    if(!ok)return;
+    await api(`/admin/projects/${p.id}/plan-data`,{method:'DELETE'});
+    setEdit(null);setNewOpen(false);setAutoOpen(false);setCopyLayoutOpen(false);
+    await reload();
+  }
+
   return <>
     <SectionHead
       kicker="05 · PLANURI & APARTAMENTE"
@@ -450,6 +536,8 @@ function Plans({p,reload}){
           {f.plan_path&&<button className="ui-action" onClick={()=>setAutoOpen(true)}>✦ Detectează apartamente</button>}
           {f.plan_path&&(f.apartments||[]).length>0&&<button className="ui-action" onClick={()=>setCopyLayoutOpen(true)}>Copiază plan + mapare</button>}
           <button className="primary" onClick={()=>setNewOpen(true)}>＋ Apartament</button>
+          {(f.plan_path||(f.apartments||[]).length>0)&&<button className="danger-ghost destructive-plan-action" onClick={deleteCurrentFloorPlanData}>Șterge plan etaj</button>}
+          {(p.buildings||[]).some(bb=>(bb.floors||[]).some(ff=>ff.plan_path||(ff.apartments||[]).length>0))&&<button className="danger-ghost destructive-plan-action" onClick={deleteAllProjectPlanData}>Șterge toate planurile</button>}
         </div>
       </div>
 

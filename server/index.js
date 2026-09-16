@@ -16,7 +16,7 @@ function verifyPassword(password,record){const [,it,salt64,hash64]=record.split(
 function auth(req,res,next){try{req.user=jwt.verify(req.cookies.es_token,JWT_SECRET);next()}catch{res.status(401).json({error:'Unauthorized'})}}
 function clean(o,allowed){return Object.fromEntries(Object.entries(o||{}).filter(([k])=>allowed.includes(k)))}
 function send(res,data,error,status=500){if(error)return res.status(status).json({error:error.message||String(error)});res.json(data)}
-app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.4.29-project-back-runtime-fix',time:'2026-09-14'}));
+app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.4.30-delete-plan-data-polygon',time:'2026-09-14'}));
 app.get('/api/health',async(req,res)=>{const {error}=await sb.from('projects').select('id',{head:true,count:'exact'});res.status(error?500:200).json({ok:!error,supabase:!error,error:error?.message})});
 app.post('/api/auth/login',(req,res)=>{if(req.body?.username===ADMIN_USER&&verifyPassword(String(req.body?.password||''),ADMIN_HASH)){const token=jwt.sign({sub:ADMIN_USER},JWT_SECRET,{expiresIn:'24h'});res.cookie('es_token',token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',maxAge:86400000});return res.json({ok:true,user:ADMIN_USER})}res.status(401).json({error:'User sau parolă incorecte'})});
 app.get('/api/auth/me',auth,(req,res)=>res.json({user:req.user.sub}));
@@ -49,6 +49,26 @@ async function deleteFloorApartments(floorId){
     const {error:de}=await sb.from('apartments').delete().in('id',ids);
     if(de)throw de;
   }
+}
+
+function cleanedFloorSettings(settings){
+  const next={...(settings||{})};
+  delete next.plan_flip_h;
+  delete next.plan_flip_v;
+  delete next.layout_source_floor_id;
+  delete next.layout_source_building_id;
+  delete next.layout_copied_at;
+  return next;
+}
+async function clearFloorPlanData(floor){
+  await deleteFloorApartments(floor.id);
+  const {error}=await sb.from('floors').update({
+    plan_path:null,
+    plan_width:null,
+    plan_height:null,
+    settings:cleanedFloorSettings(floor.settings)
+  }).eq('id',floor.id);
+  if(error)throw error;
 }
 function transformedPoints(points,flipH,flipV){
   return (points||[]).map(p=>({
@@ -441,11 +461,37 @@ app.post('/api/admin/floors/:id/copy-layout',auth,async(req,res)=>{
   }catch(e){send(res,null,e)}
 });
 
+
+app.delete('/api/admin/floors/:id/plan-data',auth,async(req,res)=>{
+  try{
+    const {data:floor,error:fe}=await sb.from('floors').select('*').eq('id',req.params.id).single();
+    if(fe)throw fe;
+    await clearFloorPlanData(floor);
+    res.json({ok:true,floor_id:floor.id});
+  }catch(e){send(res,null,e)}
+});
+
+app.delete('/api/admin/projects/:id/plan-data',auth,async(req,res)=>{
+  try{
+    const {data:buildings,error:be}=await sb.from('buildings').select('id').eq('project_id',req.params.id);
+    if(be)throw be;
+    const buildingIds=(buildings||[]).map(b=>b.id);
+    if(!buildingIds.length)return res.json({ok:true,floors_cleared:0});
+
+    const {data:floors,error:fe}=await sb.from('floors').select('*').in('building_id',buildingIds);
+    if(fe)throw fe;
+
+    for(const floor of floors||[])await clearFloorPlanData(floor);
+    res.json({ok:true,floors_cleared:(floors||[]).length});
+  }catch(e){send(res,null,e)}
+});
+
 const apartmentAllowed=['floor_id','code','title','status','rooms','usable_area_sqm','total_area_sqm','price','currency','description','model_node_name','image_path','external_url','settings'];
 app.post('/api/admin/apartments',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').insert(clean(req.body,apartmentAllowed)).select().single();send(res,data,error)});
 app.patch('/api/admin/apartments/:id',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').update(clean(req.body,apartmentAllowed)).eq('id',req.params.id).select().single();send(res,data,error)});
 app.delete('/api/admin/apartments/:id',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').delete().eq('id',req.params.id).select();send(res,data,error)});
 app.put('/api/admin/apartments/:id/polygon',auth,async(req,res)=>{const points=(req.body.points||[]).map(p=>({x:Math.max(0,Math.min(1,Number(p.x))),y:Math.max(0,Math.min(1,Number(p.y)))}));const {data,error}=await sb.from('apartment_polygons').upsert({apartment_id:req.params.id,points},{onConflict:'apartment_id'}).select().single();send(res,data,error)});
+app.delete('/api/admin/apartments/:id/polygon',auth,async(req,res)=>{const {data,error}=await sb.from('apartment_polygons').delete().eq('apartment_id',req.params.id).select();send(res,{ok:!error,deleted:data||[]},error)});
 
 app.post('/api/admin/floors/:id/auto-apartments',auth,async(req,res)=>{
   try{
