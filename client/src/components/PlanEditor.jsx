@@ -554,8 +554,8 @@ export default function PlanEditor({floor,onChanged}){
   }
 
   async function savePolygon(){
-    if(!selected)return alert('Selectează un apartament.');
-    if(draftRef.current.length<3)return alert('Poligonul are nevoie de cel puțin 3 puncte.');
+    if(!selected){setNotice('Selectează un apartament.');return;}
+    if(draftRef.current.length<3){setNotice('Poligonul are nevoie de cel puțin 3 puncte.');return;}
     setBusy(true);setNotice('');
     try{
       const saved=await api(`/admin/apartments/${selected.id}/polygon`,{
@@ -565,7 +565,7 @@ export default function PlanEditor({floor,onChanged}){
       setNotice(`Salvat · ${draftRef.current.length} puncte`);
       await onChanged?.();
     }catch(e){
-      alert(`Nu am putut salva poligonul: ${e.message}`);
+      setNotice(`Eroare la salvare: ${e.message}`);
     }finally{setBusy(false)}
   }
 

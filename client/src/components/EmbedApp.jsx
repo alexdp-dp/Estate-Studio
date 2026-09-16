@@ -1,4 +1,4 @@
-import React,{useEffect,useState} from 'react';
+import React,{useEffect,useRef,useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {api,statusLabel} from '../api';
 import ThreeViewer from './ThreeViewer';
@@ -21,6 +21,21 @@ function roomColorClass(a){
 }
 function FloorOverlay({floor,onClose,onApartment}){
   const [hover,setHover]=useState(null);
+  const [planZoom,setPlanZoom]=useState(1);
+  const planViewport=useRef(null);
+
+  useEffect(()=>{
+    setPlanZoom(1);
+  },[floor?.id]);
+
+  useEffect(()=>{
+    const el=planViewport.current;
+    if(!el)return;
+    requestAnimationFrame(()=>{
+      el.scrollLeft=Math.max(0,(el.scrollWidth-el.clientWidth)/2);
+      el.scrollTop=Math.max(0,(el.scrollHeight-el.clientHeight)/2);
+    });
+  },[planZoom]);
 
   function priceText(a){
     if(a.price===null||a.price===undefined||a.price==='')return null;
@@ -34,7 +49,17 @@ function FloorOverlay({floor,onClose,onApartment}){
 
   return <div className="embed-overlay"><div className="floor-sheet"><button className="sheet-close" onClick={onClose}>×</button>
     <div className="sheet-head"><div><span>PLAN ETAJ</span><h2>{floor.name}</h2></div><div className="legend room-legend"><i className="studio"/>Studio <i className="room2"/>2 camere <i className="room3"/>3 camere <i className="room4"/>4 camere <i className="reserved"/>Rezervat <i className="sold"/>Vândut</div></div>
-    <div className="plan-public">{floor.plan_path?<div className="plan-image-wrap"><img
+    <div className="plan-public" ref={planViewport}>
+      {floor.plan_path&&<div className="plan-zoom-controls">
+        <button disabled={planZoom<=1} onClick={()=>setPlanZoom(z=>Math.max(1,+(z-.1).toFixed(2)))} aria-label="Micșorează planul">−</button>
+        <span>{Math.round(planZoom*100)}%</span>
+        <button disabled={planZoom>=1.5} onClick={()=>setPlanZoom(z=>Math.min(1.5,+(z+.1).toFixed(2)))} aria-label="Mărește planul">＋</button>
+      </div>}
+      {floor.plan_path?<div
+        className="plan-image-wrap"
+        style={{width:`${planZoom*100}%`}}
+        onDoubleClick={()=>setPlanZoom(z=>z>1?1:1.5)}
+      ><img
       src={floor.plan_path}
       style={{
         transform:`scaleX(${floor?.settings?.plan_flip_h?-1:1}) scaleY(${floor?.settings?.plan_flip_v?-1:1})`,

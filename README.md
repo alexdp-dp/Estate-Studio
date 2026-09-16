@@ -1,3 +1,54 @@
+# Estate Studio — Build 04.4.21 Public Viewer UX
+
+Build cumulativ peste 04.4.20; adminul, mappingul, copierea între blocuri și detectorul rămân neschimbate.
+
+## Viewer public
+- meniul **Etaje** se deschide imediat lângă meniul de **Blocuri**, ca extensie a lui;
+- pe tabletă și mobil rămâne asociat vizual cu meniul de blocuri, nu în partea opusă a ecranului;
+- meniurile UI au z-index mai mare decât etichetele HTML ale blocurilor din scena 3D;
+- etichetele blocurilor nu mai pot acoperi meniurile.
+
+## Popup plan etaj
+- pe mobil este centrat în viewport;
+- fundalul zonei planului este alb, inclusiv spațiul liber din jurul imaginii;
+- eliminat aspectul de zonă gri sub plan;
+- zoom plan între **100% și 150%**, în pași de 10%;
+- controale `− / procent / +`;
+- dublu-click pe plan comută rapid între 100% și 150%;
+- la zoom, planul rămâne împreună cu poligoanele și zona devine scrollabilă.
+
+`/api/version` => `04.4.21-public-viewer-ux`
+
+# Estate Studio — Build 04.4.20 UI Buttons + Custom Dialogs
+
+Build cumulativ peste 04.4.19. Funcționalitatea de copiere, mapping, editor, detector și viewer rămâne neschimbată.
+
+## UI butoane
+Butoanele contextuale care aveau styling diferit folosesc acum același component vizual:
+- **Copiază doar structura**
+- **Copiază blocul complet**
+- **Detectează apartamente**
+- **Copiază plan + mapare**
+- acțiunile secundare din modalurile de copiere
+
+Au aceeași înălțime, border, radius, font weight, hover și spacing ca restul interfeței. Acțiunea principală rămâne dark/primary.
+
+## Confirmări în designul Estate Studio
+Confirmările native de browser au fost eliminate din admin și înlocuite cu popup branded, în designul aplicației:
+- copiere structură;
+- copiere plan + mapare;
+- copiere bloc complet;
+- regenerare etaje;
+- duplicare / ștergere proiect;
+- ștergere bloc;
+- ștergere apartament.
+
+Popup-ul are overlay, card, titlu, explicație și butoane `Renunță` / acțiunea relevantă. Escape închide, Enter confirmă.
+
+În editorul de poligoane, mesajele de eroare care foloseau `alert()` sunt afișate acum în zona de notice a editorului, fără browser alert.
+
+`/api/version` => `04.4.20-ui-buttons-custom-dialogs`
+
 # Estate Studio — Build 04.4.19 Copy Complete Building
 
 Build cumulativ peste 04.4.18. Nu schimbă editorul de poligoane, detectorul PNG, viewerul 3D sau frontend-ul existent.

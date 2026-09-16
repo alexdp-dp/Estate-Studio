@@ -39,7 +39,7 @@ function boxToPlain(box){
 
 function BuildingBubble({building,position,onClick,active=false}){
   if(!position)return null;
-  return <Html position={position} center distanceFactor={8} zIndexRange={[12,0]}>
+  return <Html position={position} center distanceFactor={8} zIndexRange={[6,0]}>
     <button className={'building-bubble '+(active?'active':'')} onClick={e=>{e.stopPropagation();onClick?.(building)}}>
       <span className="bubble-dot"/><b>{building.name}</b>
     </button>
