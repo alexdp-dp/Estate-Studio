@@ -106,8 +106,6 @@ function isMobileViewer(){
 
 function MobileWheel({items,valueId,onChoose}){
   const ref=useRef(null);
-  const settleTimer=useRef(null);
-  const programmatic=useRef(false);
   const ITEM_H=28;
   const [focusIndex,setFocusIndex]=useState(()=>{
     const i=(items||[]).findIndex(x=>x.id===valueId);
@@ -119,13 +117,8 @@ function MobileWheel({items,valueId,onChoose}){
     const i=Math.max(0,list.findIndex(x=>x.id===valueId));
     setFocusIndex(i);
     if(!ref.current)return;
-    programmatic.current=true;
     ref.current.scrollTop=i*ITEM_H;
-    const t=setTimeout(()=>{programmatic.current=false},80);
-    return()=>clearTimeout(t);
   },[valueId,items]);
-
-  useEffect(()=>()=>clearTimeout(settleTimer.current),[]);
 
   function scrollToIndex(i){
     const idx=Math.max(0,Math.min((items||[]).length-1,i));
@@ -136,17 +129,12 @@ function MobileWheel({items,valueId,onChoose}){
   function onScroll(e){
     const idx=Math.max(0,Math.min((items||[]).length-1,Math.round(e.currentTarget.scrollTop/ITEM_H)));
     setFocusIndex(idx);
-    if(programmatic.current)return;
-
-    clearTimeout(settleTimer.current);
-    settleTimer.current=setTimeout(()=>{
-      const item=(items||[])[idx];
-      if(item)onChoose?.(item);
-    },170);
   }
 
   return <div className="mobile-wheel-wrap">
     <div className="mobile-wheel-center" aria-hidden="true"/>
+    <div className="mobile-wheel-cue mobile-wheel-cue-up" aria-hidden="true">⌃</div>
+    <div className="mobile-wheel-cue mobile-wheel-cue-down" aria-hidden="true">⌄</div>
     <div className="mobile-wheel" ref={ref} onScroll={onScroll}>
       {(items||[]).map((item,i)=>{
         const d=i-focusIndex;
@@ -157,7 +145,12 @@ function MobileWheel({items,valueId,onChoose}){
           className={cls}
           style={{'--wheel-tilt':`${d<0?38:d>0?-38:0}deg`}}
           onClick={()=>{
-            scrollToIndex(i);
+            // Scroll only changes the highlighted candidate.
+            // Enter/select only on an explicit second tap on the centered item.
+            if(i!==focusIndex){
+              scrollToIndex(i);
+              return;
+            }
             onChoose?.(item);
           }}
         >

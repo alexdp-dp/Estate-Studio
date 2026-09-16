@@ -1,3 +1,34 @@
+# Estate Studio — Build 04.4.28 Wheel Spacing + Cues
+
+Update rapid peste 04.4.27.
+
+## Mobile wheel picker
+- labelul principal (`Etaj 4`, `Bloc 2`) și informația secundară (`0 libere`, `02`) sunt aduse mai aproape de centrul pickerului;
+- nu mai stau lipite de marginile stânga/dreapta;
+- numele blocului din headerul pickerului este mai mare;
+- `← Blocuri` / `← Ansamblu` este mai mare și mai ușor de apăsat/citit;
+- adăugate două indicii vizuale `⌃` și `⌄` sus/jos, ca să fie clar că pickerul se derulează vertical.
+
+Comportamentul din 04.4.27 rămâne: scroll-ul doar evidențiază, iar tap-ul explicit confirmă selecția.
+
+`/api/version` => `04.4.28-wheel-spacing-cues`
+
+# Estate Studio — Build 04.4.27 Wheel Tap Confirm
+
+Hotfix peste 04.4.26.
+
+## Comportament nou al wheel picker-ului
+- scroll-ul vertical doar mută/highlight-uiește itemul din centru;
+- oprirea scroll-ului NU mai intră automat în bloc sau etaj;
+- itemul central devine doar selecția curentă din picker;
+- pentru a intra, utilizatorul trebuie să dea tap pe itemul central;
+- dacă dă tap pe un item care nu este încă în centru, primul tap doar îl aduce în centru;
+- al doilea tap pe itemul centrat confirmă și intră în bloc / etaj.
+
+Restul viewerului mobil rămâne neschimbat.
+
+`/api/version` => `04.4.27-wheel-tap-confirm`
+
 # Estate Studio — Build 04.4.26 Mobile Wheel Picker
 
 Build cumulativ peste 04.4.25.

@@ -1630,3 +1630,105 @@ h1,h2,h3,h4,h5,h6,b,strong,
     .mobile-wheel-wrap{height:70px}
   }
 }
+
+
+/* 04.4.27 — scrolling only highlights; tap confirms selection */
+@media(max-width:600px){
+  .mobile-wheel-tap-hint{
+    position:absolute;
+    z-index:5;
+    right:8px;
+    top:28px;
+    pointer-events:none;
+    color:#6f8077;
+    font-size:6px;
+    font-weight:800;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    opacity:.62;
+  }
+}
+
+
+/* 04.4.28 — wheel readability / centering / scroll cues */
+@media(max-width:600px){
+  /* Bring the two pieces of information toward the middle of the picker. */
+  .mobile-wheel>button{
+    justify-content:center !important;
+    gap:12px !important;
+    padding-left:18px !important;
+    padding-right:18px !important;
+  }
+  .mobile-wheel>button span{
+    flex:0 1 auto;
+    min-width:0;
+    max-width:58%;
+    text-align:right;
+  }
+  .mobile-wheel>button small{
+    flex:0 0 auto;
+    min-width:42px;
+    text-align:left;
+  }
+
+  /* Building name + back link are important context, not micro-labels. */
+  .mobile-wheel-head small{
+    font-size:9px !important;
+    line-height:1.1 !important;
+    font-weight:800 !important;
+    letter-spacing:.07em !important;
+  }
+  .mobile-wheel-subback{
+    font-size:9px !important;
+    line-height:1.1 !important;
+    padding-top:4px !important;
+    color:#596b62 !important;
+  }
+
+  /* Explicit vertical-scroll affordance. */
+  .mobile-wheel-cue{
+    position:absolute;
+    z-index:6;
+    left:50%;
+    transform:translateX(-50%);
+    width:20px;
+    height:12px;
+    display:grid;
+    place-items:center;
+    pointer-events:none;
+    color:#60746a;
+    font-size:13px;
+    font-weight:900;
+    line-height:1;
+    opacity:.76;
+    text-shadow:0 1px 0 #fff;
+  }
+  .mobile-wheel-cue-up{top:0}
+  .mobile-wheel-cue-down{bottom:0}
+
+  .mobile-wheel-wrap::before,
+  .mobile-wheel-wrap::after{
+    z-index:5;
+  }
+  .mobile-wheel-center{
+    z-index:2;
+  }
+  .mobile-wheel{
+    z-index:3;
+  }
+
+  @media(max-width:420px){
+    .mobile-wheel>button{
+      gap:9px !important;
+      padding-left:12px !important;
+      padding-right:12px !important;
+    }
+    .mobile-wheel>button small{
+      min-width:38px;
+    }
+    .mobile-wheel-head small,
+    .mobile-wheel-subback{
+      font-size:8.5px !important;
+    }
+  }
+}
