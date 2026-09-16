@@ -104,6 +104,71 @@ function isMobileViewer(){
   return typeof window!=='undefined' && window.matchMedia?.('(max-width: 600px)')?.matches;
 }
 
+function MobileWheel({items,valueId,onChoose}){
+  const ref=useRef(null);
+  const settleTimer=useRef(null);
+  const programmatic=useRef(false);
+  const ITEM_H=28;
+  const [focusIndex,setFocusIndex]=useState(()=>{
+    const i=(items||[]).findIndex(x=>x.id===valueId);
+    return i>=0?i:0;
+  });
+
+  useEffect(()=>{
+    const list=items||[];
+    const i=Math.max(0,list.findIndex(x=>x.id===valueId));
+    setFocusIndex(i);
+    if(!ref.current)return;
+    programmatic.current=true;
+    ref.current.scrollTop=i*ITEM_H;
+    const t=setTimeout(()=>{programmatic.current=false},80);
+    return()=>clearTimeout(t);
+  },[valueId,items]);
+
+  useEffect(()=>()=>clearTimeout(settleTimer.current),[]);
+
+  function scrollToIndex(i){
+    const idx=Math.max(0,Math.min((items||[]).length-1,i));
+    setFocusIndex(idx);
+    ref.current?.scrollTo({top:idx*ITEM_H,behavior:'smooth'});
+  }
+
+  function onScroll(e){
+    const idx=Math.max(0,Math.min((items||[]).length-1,Math.round(e.currentTarget.scrollTop/ITEM_H)));
+    setFocusIndex(idx);
+    if(programmatic.current)return;
+
+    clearTimeout(settleTimer.current);
+    settleTimer.current=setTimeout(()=>{
+      const item=(items||[])[idx];
+      if(item)onChoose?.(item);
+    },170);
+  }
+
+  return <div className="mobile-wheel-wrap">
+    <div className="mobile-wheel-center" aria-hidden="true"/>
+    <div className="mobile-wheel" ref={ref} onScroll={onScroll}>
+      {(items||[]).map((item,i)=>{
+        const d=i-focusIndex;
+        const ad=Math.abs(d);
+        const cls=ad===0?'active':ad===1?'near':'far';
+        return <button
+          key={item.id}
+          className={cls}
+          style={{'--wheel-tilt':`${d<0?38:d>0?-38:0}deg`}}
+          onClick={()=>{
+            scrollToIndex(i);
+            onChoose?.(item);
+          }}
+        >
+          <span>{item.label}</span>
+          {item.meta&&<small>{item.meta}</small>}
+        </button>
+      })}
+    </div>
+  </div>
+}
+
 export default function EmbedApp(){
   const {slug}=useParams();
   const [project,setProject]=useState(null),[error,setError]=useState('');
@@ -180,58 +245,58 @@ export default function EmbedApp(){
       <div>{[...(building.floors||[])].reverse().map(f=><button key={f.id} onMouseEnter={()=>setActiveFloor(f)} onMouseLeave={()=>!floor&&setActiveFloor(null)} onClick={()=>{setActiveFloor(f);setFloor(f)}}><span>{f.name}</span><small>{f.apartments?.filter(a=>a.status==='available').length||0} disponibile</small></button>)}</div>
     </aside>}
 
-    <div className="mobile-explorer-inline">
-      <div className="mobile-inline-head">
+    <div className="mobile-wheel-bar">
+      <div className="mobile-wheel-head">
         {mobileTab==='floors'&&building?<button
-          className="mobile-inline-back"
+          className="mobile-wheel-back"
           onClick={()=>{
             setMobileTab('buildings');
             setFloor(null);
             setActiveFloor(null);
           }}
-          aria-label="Înapoi la blocuri"
         >‹</button>:buildingId?<button
-          className="mobile-inline-back"
+          className="mobile-wheel-back"
           onClick={()=>selectBuilding(null)}
-          aria-label="Înapoi la ansamblu"
         >‹</button>:null}
 
-        <div className="mobile-inline-title">
+        <div>
           <small>{mobileTab==='floors'&&building?building.name:'ANSAMBLU'}</small>
           <b>{mobileTab==='floors'&&building?'Alege etajul':'Alege blocul'}</b>
+          {(mobileTab==='floors'&&building)&&<button
+            className="mobile-wheel-subback"
+            onClick={()=>setMobileTab('buildings')}
+          >← Blocuri</button>}
+          {(mobileTab==='buildings'&&buildingId)&&<button
+            className="mobile-wheel-subback"
+            onClick={()=>selectBuilding(null)}
+          >← Ansamblu</button>}
         </div>
       </div>
 
-      <div className="mobile-inline-scroll">
-        {mobileTab==='buildings'?<>
-          {(project.buildings||[]).map((b,i)=><button
-            key={b.id}
-            className={buildingId===b.id?'active':''}
-            onClick={()=>selectBuilding(b)}
-          >
-            <span>{b.name}</span>
-            <small>{String(i+1).padStart(2,'0')}</small>
-          </button>)}
-        </>:<>
-          {[...(building?.floors||[])].reverse().map(f=><button
-            key={f.id}
-            className={activeFloor?.id===f.id?'active':''}
-            onClick={()=>{
-              setActiveFloor(f);
-              setFloor(f);
-            }}
-          >
-            <span>{f.name}</span>
-            <small>{f.apartments?.filter(a=>a.status==='available').length||0}</small>
-          </button>)}
-        </>}
-      </div>
-
-      <div className="mobile-inline-trail">
-        {mobileTab==='floors'&&building?<button onClick={()=>setMobileTab('buildings')}>← Blocuri</button>:
-          buildingId?<button onClick={()=>selectBuilding(null)}>← Ansamblu</button>:
-          <span>Glisează pentru a alege</span>}
-      </div>
+      {mobileTab==='buildings'?<MobileWheel
+        key="building-wheel"
+        valueId={buildingId}
+        items={(project.buildings||[]).map((b,i)=>({
+          id:b.id,
+          label:b.name,
+          meta:String(i+1).padStart(2,'0'),
+          raw:b
+        }))}
+        onChoose={item=>selectBuilding(item.raw)}
+      />:<MobileWheel
+        key={`floor-wheel-${building?.id||'none'}`}
+        valueId={activeFloor?.id}
+        items={[...(building?.floors||[])].reverse().map(f=>({
+          id:f.id,
+          label:f.name,
+          meta:`${f.apartments?.filter(a=>a.status==='available').length||0} libere`,
+          raw:f
+        }))}
+        onChoose={item=>{
+          setActiveFloor(item.raw);
+          setFloor(item.raw);
+        }}
+      />}
     </div>
 
 

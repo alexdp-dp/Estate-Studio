@@ -1,3 +1,26 @@
+# Estate Studio — Build 04.4.26 Mobile Wheel Picker
+
+Build cumulativ peste 04.4.25.
+
+## Mobile selector
+Selectorul orizontal cu carduri a fost înlocuit cu un **wheel picker vertical**, tip cilindru / iOS picker:
+
+- bara rămâne compactă (~86 px);
+- lista de blocuri se derulează vertical în aceeași bară;
+- itemul central este mare și clar;
+- itemurile de sus/jos sunt mai mici, estompate și ușor rotite în perspectivă;
+- scroll-ul face snap pe fiecare item;
+- după ce scroll-ul se oprește pe un bloc, acel bloc este selectat și bara trece automat la **Alege etajul**;
+- etajele folosesc exact același wheel vertical;
+- selectarea unui etaj deschide planul;
+- în modul Etaje există back către **Blocuri**;
+- din Blocuri există back către **Ansamblu**;
+- tap pe un item îl aduce/selectează direct.
+
+Modelul 3D rămâne aproape complet vizibil; nu se mai deschide niciun sheet mare.
+
+`/api/version` => `04.4.26-mobile-wheel-picker`
+
 # Estate Studio — Build 04.4.25 Mobile Inline Selector
 
 Build cumulativ peste 04.4.24.
