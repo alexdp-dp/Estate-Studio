@@ -1,3 +1,46 @@
+# Estate Studio — Build 04.4.23 Mobile Bottom Sheet + Helvetica
+
+Build cumulativ peste 04.4.22.
+
+## Mobile viewer
+Pe ecrane de maximum 600px:
+- panourile desktop `Plan general` + `Selectează etajul` nu mai stau simultan peste model;
+- sunt înlocuite de o bară compactă jos;
+- tap pe bară deschide un bottom sheet de maximum ~43% din viewport;
+- bottom sheet-ul are taburi `Blocuri` / `Etaje`;
+- alegerea unui bloc trece automat la tabul `Etaje`;
+- alegerea unui etaj închide sheet-ul și deschide planul;
+- după selectarea blocului poți închide sheet-ul și atinge direct etajul în modelul 3D;
+- desktop/tablet behavior rămâne neschimbat.
+
+## Text și font
+- eliminat textul `O nouă perspectivă.`;
+- fontul general este acum `Helvetica Neue / Helvetica / Arial`;
+- textul normal folosește look light, iar titlurile/acțiunile folosesc look black/bold;
+- numele proiectului din frontend folosește explicit Helvetica Black-style;
+- nu sunt incluse font files; se folosesc fonturile sistemului/fallback.
+
+## Backend
+- adăugat spațiu vizual între `← Proiecte` și `PUBLICAT / DRAFT` în headerul proiectului.
+
+## Paletă frontend
+- eliminat bejul din `Plan general`;
+- meniurile `Plan general` și `Selectează etajul` folosesc acum o paletă cool-white / sage / graphite, cu accent verde discret;
+- aceeași paletă este folosită de bottom sheet-ul de mobil.
+
+`/api/version` => `04.4.23-mobile-bottom-sheet-helvetica`
+
+# Estate Studio — Build 04.4.22 Zoom Controls Left
+
+Update rapid peste 04.4.21.
+
+- controalele de zoom ale planului (`− / % / +`) sunt mutate pe partea stângă a viewportului;
+- rămân în viewport când planul este mărit și scrollat;
+- pe mobil sunt ancorate în stânga-sus, cu padding mic;
+- restul viewerului rămâne neschimbat.
+
+`/api/version` => `04.4.22-zoom-controls-left`
+
 # Estate Studio — Build 04.4.21 Public Viewer UX
 
 Build cumulativ peste 04.4.20; adminul, mappingul, copierea între blocuri și detectorul rămân neschimbate.

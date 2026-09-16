@@ -99,11 +99,17 @@ function ApartmentCard({a,onClose}){
   return <div className="embed-overlay"><div className="apartment-card"><button className="sheet-close" onClick={onClose}>×</button>{a.image_path&&<img src={a.image_path}/>}<span className={'status-pill '+a.status}>{statusLabel[a.status]}</span><h2>{a.title||a.code}</h2><div className="apartment-stats"><div><b>{a.rooms||'—'}</b><span>camere</span></div><div><b>{a.usable_area_sqm||'—'}</b><span>m² utili</span></div><div><b>{a.total_area_sqm||'—'}</b><span>m² total</span></div></div>{a.price&&<div className="price">{Number(a.price).toLocaleString('ro-RO')} {a.currency||'EUR'}</div>}<p>{a.description}</p>{a.external_url&&<a className="primary button-link" href={a.external_url} target="_blank" rel="noreferrer">Vezi apartamentul</a>}</div></div>
 }
 
+
+function isMobileViewer(){
+  return typeof window!=='undefined' && window.matchMedia?.('(max-width: 600px)')?.matches;
+}
+
 export default function EmbedApp(){
   const {slug}=useParams();
   const [project,setProject]=useState(null),[error,setError]=useState('');
   const [buildingId,setBuildingId]=useState(null),[floor,setFloor]=useState(null),[apartment,setApartment]=useState(null),[activeFloor,setActiveFloor]=useState(null);
   const [viewer,setViewer]=useState(null),[autoRotate,setAutoRotate]=useState(false),[view,setView]=useState('perspective');
+  const [mobileSheetOpen,setMobileSheetOpen]=useState(false),[mobileTab,setMobileTab]=useState('buildings');
 
   useEffect(()=>{
     const preview=new URLSearchParams(window.location.search).get('preview')==='1';
@@ -126,10 +132,18 @@ export default function EmbedApp(){
       setView('perspective');
       viewer?.setPreset?.('perspective');
       setBuildingId(b.id);
+      if(isMobileViewer()){
+        setMobileTab('floors');
+        setMobileSheetOpen(true);
+      }
     }else{
       setBuildingId(null);
       setView('perspective');
       viewer?.setPreset?.('perspective');
+      if(isMobileViewer()){
+        setMobileTab('buildings');
+        setMobileSheetOpen(false);
+      }
     }
   }
   function setPreset(p){setView(p);viewer?.setPreset?.(p)}
@@ -142,7 +156,12 @@ export default function EmbedApp(){
       selectedBuildingId={buildingId}
       selectedFloor={activeFloor}
       onSelectBuilding={selectBuilding}
-      onSelectFloor={(f,b)=>{setBuildingId(b.id);setActiveFloor(f);setFloor(f)}}
+      onSelectFloor={(f,b)=>{
+        setBuildingId(b.id);
+        setActiveFloor(f);
+        setFloor(f);
+        if(isMobileViewer())setMobileSheetOpen(false);
+      }}
       publicMode
       showGrid={false}
       showBubbles
@@ -158,15 +177,71 @@ export default function EmbedApp(){
 
     <aside className="macheta-nav">
       <small>PLAN GENERAL</small>
-      <h1>O nouă perspectivă.</h1>
       <button className={!buildingId?'active':''} onClick={()=>selectBuilding(null)}><span>Toate clădirile</span><i>↗</i></button>
       {(project.buildings||[]).map((b,i)=><button key={b.id} className={buildingId===b.id?'active':''} onClick={()=>selectBuilding(b)}><span>{b.name}</span><em>{String(i+1).padStart(2,'0')}</em></button>)}
     </aside>
 
     {building&&<aside className="macheta-floors">
       <div><small>{building.name} · PRIM-PLAN</small><b>Selectează etajul</b></div>
-      <div>{[...(building.floors||[])].reverse().map(f=><button key={f.id} onMouseEnter={()=>setActiveFloor(f)} onMouseLeave={()=>!floor&&setActiveFloor(null)} onClick={()=>{setActiveFloor(f);setFloor(f)}}><span>{f.name}</span><small>{f.apartments?.filter(a=>a.status==='available').length||0} disponibile</small></button>)}</div>
+      <div>{[...(building.floors||[])].reverse().map(f=><button key={f.id} onMouseEnter={()=>setActiveFloor(f)} onMouseLeave={()=>!floor&&setActiveFloor(null)} onClick={()=>{setActiveFloor(f);setFloor(f);if(isMobileViewer())setMobileSheetOpen(false)}}><span>{f.name}</span><small>{f.apartments?.filter(a=>a.status==='available').length||0} disponibile</small></button>)}</div>
     </aside>}
+
+    <div className={'mobile-explorer '+(mobileSheetOpen?'open':'')}>
+      {mobileSheetOpen&&<div className="mobile-explorer-sheet">
+        <div className="mobile-sheet-top">
+          <div>
+            <small>EXPLORARE 3D</small>
+            <b>{mobileTab==='buildings'?'Alege blocul':'Alege etajul'}</b>
+          </div>
+          <button className="mobile-sheet-close" onClick={()=>setMobileSheetOpen(false)}>×</button>
+        </div>
+
+        <div className="mobile-sheet-tabs">
+          <button className={mobileTab==='buildings'?'active':''} onClick={()=>setMobileTab('buildings')}>Blocuri</button>
+          <button className={mobileTab==='floors'?'active':''} disabled={!building} onClick={()=>setMobileTab('floors')}>Etaje</button>
+        </div>
+
+        {mobileTab==='buildings'?<div className="mobile-sheet-list">
+          <button className={!buildingId?'active':''} onClick={()=>{selectBuilding(null);setMobileSheetOpen(false)}}>
+            <span>Toate clădirile</span><small>Plan general</small>
+          </button>
+          {(project.buildings||[]).map((b,i)=><button
+            key={b.id}
+            className={buildingId===b.id?'active':''}
+            onClick={()=>{selectBuilding(b);setMobileTab('floors');setMobileSheetOpen(true)}}
+          >
+            <span>{b.name}</span><small>{String(i+1).padStart(2,'0')}</small>
+          </button>)}
+        </div>:<div className="mobile-sheet-list mobile-floor-list">
+          <div className="mobile-direct-hint">Poți atinge direct un etaj și în modelul 3D.</div>
+          {[...(building?.floors||[])].reverse().map(f=><button
+            key={f.id}
+            onClick={()=>{
+              setActiveFloor(f);
+              setFloor(f);
+              setMobileSheetOpen(false);
+            }}
+          >
+            <span>{f.name}</span>
+            <small>{f.apartments?.filter(a=>a.status==='available').length||0} disponibile</small>
+          </button>)}
+        </div>}
+      </div>}
+
+      <button
+        className="mobile-explorer-bar"
+        onClick={()=>{
+          setMobileTab(building?'floors':'buildings');
+          setMobileSheetOpen(v=>!v);
+        }}
+      >
+        <span>
+          <small>{building?building.name:'PLAN GENERAL'}</small>
+          <b>{building?(floor?.name||'Alege etajul'):'Alege blocul'}</b>
+        </span>
+        <i>{mobileSheetOpen?'⌄':'⌃'}</i>
+      </button>
+    </div>
 
     <div className="macheta-view-controls">
       <button className={view==='perspective'?'active':''} onClick={()=>setPreset('perspective')}>Perspectivă</button>
