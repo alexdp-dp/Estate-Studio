@@ -1223,3 +1223,209 @@ h1,h2,h3,h4,h5,h6,b,strong,
     font-size:13px;
   }
 }
+
+
+/* 04.4.24 — FIX: image + SVG polygons must always share the exact same box.
+   The previous mobile centering made .plan-image-wrap fill the viewport height,
+   while the <img> kept its intrinsic aspect ratio. The absolute SVG then stretched
+   to the taller wrapper, so polygons no longer matched the plan. */
+@media(max-width:600px){
+  .plan-public{
+    display:block !important;
+    background:#fff !important;
+  }
+
+  .plan-public .plan-image-wrap{
+    position:relative !important;
+    display:block !important;
+    align-items:initial !important;
+    min-height:0 !important;
+    height:auto !important;
+    min-width:100%;
+    margin-left:auto !important;
+    margin-right:auto !important;
+  }
+
+  .plan-public .plan-image-wrap > img{
+    display:block !important;
+    width:100% !important;
+    height:auto !important;
+    max-width:none !important;
+    position:relative !important;
+  }
+
+  .plan-public .plan-image-wrap > svg{
+    position:absolute !important;
+    inset:0 !important;
+    width:100% !important;
+    height:100% !important;
+    display:block !important;
+  }
+}
+
+
+/* 04.4.25 — mobile navigation stays inside one compact bar.
+   No expanding bottom sheet: building/floor lists scroll horizontally in-place. */
+.mobile-explorer-inline{display:none}
+
+@media(max-width:600px){
+  .mobile-explorer,
+  .mobile-explorer-sheet,
+  .mobile-explorer-bar{
+    display:none!important;
+  }
+
+  .macheta-nav,
+  .macheta-floors{
+    display:none!important;
+  }
+
+  .mobile-explorer-inline{
+    position:absolute;
+    z-index:97;
+    left:8px;
+    right:8px;
+    bottom:62px;
+    height:72px;
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr) auto;
+    align-items:center;
+    gap:8px;
+    padding:7px 8px;
+    border:1px solid rgba(205,219,212,.98);
+    border-radius:18px;
+    background:rgba(248,251,249,.97);
+    color:#142019;
+    box-shadow:0 12px 32px rgba(10,24,16,.18);
+    backdrop-filter:blur(14px);
+  }
+
+  .mobile-inline-head{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    min-width:118px;
+  }
+  .mobile-inline-back{
+    width:32px;
+    height:32px;
+    flex:0 0 32px;
+    display:grid;
+    place-items:center;
+    border:0;
+    border-radius:50%;
+    background:#e7efeb;
+    color:#17261e;
+    font-size:25px;
+    line-height:1;
+    padding:0 0 3px;
+  }
+  .mobile-inline-title{
+    display:grid;
+    gap:1px;
+    min-width:0;
+  }
+  .mobile-inline-title small{
+    max-width:92px;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+    color:#7b8982;
+    font-size:7px;
+    line-height:1.1;
+    letter-spacing:.10em;
+    font-weight:700;
+  }
+  .mobile-inline-title b{
+    white-space:nowrap;
+    font-size:12px;
+    line-height:1.05;
+    font-weight:900;
+  }
+
+  .mobile-inline-scroll{
+    min-width:0;
+    height:100%;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    overflow-x:auto;
+    overflow-y:hidden;
+    padding:2px 1px;
+    scroll-snap-type:x proximity;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  .mobile-inline-scroll::-webkit-scrollbar{display:none}
+
+  .mobile-inline-scroll>button{
+    flex:0 0 auto;
+    min-width:62px;
+    height:48px;
+    display:grid;
+    align-content:center;
+    gap:1px;
+    padding:5px 9px;
+    border:1px solid #dce5e0;
+    border-radius:12px;
+    background:#fff;
+    color:#26362e;
+    text-align:left;
+    scroll-snap-align:center;
+  }
+  .mobile-inline-scroll>button span{
+    max-width:76px;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+    font-size:10px;
+    font-weight:800;
+  }
+  .mobile-inline-scroll>button small{
+    color:#89978f;
+    font-size:7px;
+    font-weight:600;
+  }
+  .mobile-inline-scroll>button.active{
+    border-color:#0c9650;
+    background:#e7f3ec;
+    color:#087a43;
+    box-shadow:inset 3px 0 0 #0c9650;
+  }
+
+  .mobile-inline-trail{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    min-width:56px;
+  }
+  .mobile-inline-trail button{
+    border:0;
+    background:transparent;
+    color:#607068;
+    padding:7px 4px;
+    font-size:8px;
+    font-weight:800;
+    white-space:nowrap;
+  }
+  .mobile-inline-trail span{
+    display:none;
+  }
+
+  /* Camera controls stay beneath the selector; the model remains mostly unobstructed. */
+  .macheta-view-controls{
+    bottom:7px;
+  }
+
+  /* On very narrow phones, compress the left title and remove the textual back trail.
+     The circular back button still provides navigation. */
+  @media(max-width:420px){
+    .mobile-explorer-inline{
+      grid-template-columns:auto minmax(0,1fr);
+    }
+    .mobile-inline-trail{display:none}
+    .mobile-inline-head{min-width:102px}
+    .mobile-inline-title small{max-width:72px}
+    .mobile-inline-scroll>button{min-width:56px;padding-left:7px;padding-right:7px}
+  }
+}

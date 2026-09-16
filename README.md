@@ -1,3 +1,43 @@
+# Estate Studio — Build 04.4.25 Mobile Inline Selector
+
+Build cumulativ peste 04.4.24.
+
+## Mobile navigation
+Bottom-sheet-ul expansibil a fost eliminat complet pe telefon.
+
+Tot fluxul de navigare se întâmplă acum într-o singură bară compactă:
+- starea inițială: **Alege blocul**;
+- blocurile sunt chips/butoane într-un rând cu scroll orizontal;
+- selectarea unui bloc schimbă aceeași bară în **Alege etajul**;
+- etajele sunt tot într-un rând cu scroll orizontal;
+- selectarea unui etaj deschide planul;
+- în modul Etaje există `‹` / `← Blocuri`;
+- în modul Blocuri, dacă există un bloc selectat, `‹` / `← Ansamblu` revine la planul general;
+- bara nu se mai ridică peste model și nu mai acoperă jumătate din scena 3D.
+
+Selecția directă prin tap pe bloc / etaj în modelul 3D rămâne funcțională.
+
+Desktop-ul și restul viewerului rămân neschimbate.
+
+`/api/version` => `04.4.25-mobile-inline-selector`
+
+# Estate Studio — Build 04.4.24 Plan Overlay Alignment Fix
+
+Hotfix peste 04.4.23.
+
+## Problema
+Pe mobil, `plan-image-wrap` fusese făcut `min-height:100%` + `display:flex` pentru centrare. Imaginea PNG își păstra aspect ratio-ul real, dar SVG-ul cu poligoane ocupa întreaga înălțime a wrapperului. Rezultatul: planul și poligoanele nu se mai suprapuneau corect, atât la 100%, cât și la zoom.
+
+## Fix
+- wrapperul planului își ia din nou înălțimea strict din imagine;
+- imaginea și SVG-ul au exact aceeași cutie;
+- SVG-ul rămâne `absolute inset:0` peste PNG;
+- zoom 100–150% mărește wrapperul complet, deci PNG + poligoane se scalează împreună;
+- modalul rămâne centrat și fundalul rămâne alb;
+- bottom-sheet-ul mobil, Helvetica și restul UX-ului din 04.4.23 rămân neschimbate.
+
+`/api/version` => `04.4.24-plan-overlay-alignment-fix`
+
 # Estate Studio — Build 04.4.23 Mobile Bottom Sheet + Helvetica
 
 Build cumulativ peste 04.4.22.
