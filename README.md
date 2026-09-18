@@ -1,3 +1,62 @@
+# Estate Studio — Build 04.6.2 2D Viewer Fit + Hover
+
+Build cumulativ peste 04.6.1.
+
+## Viewer 2D
+- randarea 2D folosește acum întregul canvas disponibil pe desktop;
+- meniurile Estate Studio plutesc peste viewer și nu mai rezervă permanent o coloană mare în stânga;
+- imaginea este upscalată/downscalată cu `object-fit: contain`;
+- overlay-ul SVG folosește aspect-ratio-ul real al imaginii, astfel încât mappingul rămâne aliniat și când imaginea este letterboxed.
+
+## Mapping public
+În standby se vede numai randarea:
+- fără hașură;
+- fără fill;
+- fără contur;
+- fără label-uri peste blocuri sau etaje.
+
+La hover apare doar poligonul elementului aflat sub cursor.
+
+## Tooltip 2D
+Tooltip-ul este centrat jos pe suprafața reală a imaginii, nu pe viewport:
+- ansamblu: `Selectează un bloc`;
+- bloc: `Selectează un etaj`;
+- hover bloc/etaj: numele + numărul de apartamente disponibile;
+- în scena unui bloc apare în stânga tooltip-ului o săgeată `←` către ansamblu / bloc.
+
+## Editor 2D
+Explicația despre implementarea motorului de poligoane a fost eliminată.
+Zona de help conține acum doar instrucțiuni de utilizare.
+
+`/api/version` => `04.6.2-2d-viewer-fit-hover`
+
+# Estate Studio — Build 04.6.1 Perspective Polygons
+
+Hotfix cumulativ peste 04.6.0.
+
+## Editor 2D pentru randări în perspectivă
+Doar cele două editoare din `Model 2D / 3D`:
+- maparea blocurilor pe randarea ansamblului;
+- maparea etajelor pe randarea blocului;
+
+rulează acum cu `perspectiveMode`.
+
+În acest mod:
+- liniile pot avea orice unghi;
+- desenarea nu mai face snap 0/90 sau 45;
+- mutarea punctelor este complet liberă;
+- drag pe o latură îi păstrează unghiul și o mută paralel;
+- ștergerea unui punct nu mai încearcă să refacă geometria ortogonal;
+- rămân active Undo, Snap vertices, delete/insert point, Copy/Flip/Paste, move polygon, pan, zoom și fit.
+
+Toolbar-ul afișează `Unghi liber` + `Snap vertices`, în locul controalelor ortogonale.
+
+## Editor apartamente
+Editorul de poligoane al apartamentelor pe planul de etaj NU folosește `perspectiveMode`.
+Comportamentul lui ortogonal, snap 0/90, 45°, Snap edit și geometria stabilizată rămân neschimbate.
+
+`/api/version` => `04.6.1-perspective-polygons`
+
 # Estate Studio — Build 04.6.0 Hybrid 2D / 3D
 
 Build cumulativ peste 04.5.7.

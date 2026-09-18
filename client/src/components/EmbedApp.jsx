@@ -189,59 +189,110 @@ const twoDPalette=[
   {fill:'rgba(225,189,100,.23)',hover:'rgba(199,158,61,.42)',stroke:'#a88737'}
 ];
 
-function TwoDViewer({project,building,activeFloor,onSelectBuilding,onSelectFloor}){
+function TwoDViewer({project,building,activeFloor,onSelectBuilding,onSelectFloor,onBackToOverview}){
   const twoD=project?.settings?.two_d||{};
   const overview=twoD.overview||{};
   const scene=building?(twoD.buildings?.[building.id]||{}):overview;
   const imageUrl=scene.image_url||(building?overview.image_url:null);
   const [hoverId,setHoverId]=useState(null);
+  const [imageMeta,setImageMeta]=useState({w:1600,h:900});
+  const [stageSize,setStageSize]=useState({w:0,h:0});
+  const stageRef=useRef(null);
 
   const showingBuildingScene=!!(building&&scene.image_url);
   const targets=showingBuildingScene
     ? (building.floors||[]).map((f,index)=>({id:f.id,label:f.name,raw:f,points:scene.polygons?.[f.id]||[],index,type:'floor'}))
     : (project.buildings||[]).map((b,index)=>({id:b.id,label:b.name,raw:b,points:overview.polygons?.[b.id]||[],index,type:'building'}));
 
-  const selectedId=showingBuildingScene?activeFloor?.id:building?.id;
+  const hoverTarget=targets.find(t=>t.id===hoverId)||null;
+
+  useEffect(()=>{
+    const node=stageRef.current;
+    if(!node)return;
+    const update=()=>setStageSize({w:node.clientWidth,h:node.clientHeight});
+    update();
+    const ro=new ResizeObserver(update);
+    ro.observe(node);
+    return ()=>ro.disconnect();
+  },[imageUrl]);
 
   function clickTarget(t){
     if(t.type==='building')onSelectBuilding?.(t.raw);
     else onSelectFloor?.(t.raw,building);
   }
 
+  function availableFor(t){
+    if(!t)return {available:0,total:0};
+    const aps=t.type==='floor'
+      ? (t.raw.apartments||[])
+      : (t.raw.floors||[]).flatMap(f=>f.apartments||[]);
+    return {
+      available:aps.filter(a=>a.status==='available').length,
+      total:aps.length
+    };
+  }
+
+  const hoverStats=availableFor(hoverTarget);
+
+  const imageRect=(()=>{
+    const cw=stageSize.w||1,ch=stageSize.h||1,iw=imageMeta.w||1,ih=imageMeta.h||1;
+    const scale=Math.min(cw/iw,ch/ih);
+    const w=iw*scale,h=ih*scale;
+    return {x:(cw-w)/2,y:(ch-h)/2,w,h};
+  })();
+
+  const tooltipStyle={
+    left:`${imageRect.x+imageRect.w/2}px`,
+    top:`${Math.max(imageRect.y+22,imageRect.y+imageRect.h-18)}px`
+  };
+
   return <div className="two-d-public-viewer">
-    {imageUrl?<div className="two-d-public-stage">
-      <img src={imageUrl} alt={building?building.name:project.name}/>
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+    {imageUrl?<div className="two-d-public-stage" ref={stageRef}>
+      <img
+        src={imageUrl}
+        alt={building?building.name:project.name}
+        onLoad={e=>setImageMeta({w:e.currentTarget.naturalWidth||1600,h:e.currentTarget.naturalHeight||900})}
+      />
+      <svg
+        viewBox={`0 0 ${imageMeta.w||1600} ${imageMeta.h||900}`}
+        preserveAspectRatio="xMidYMid meet"
+      >
         {targets.map(t=>{
           if((t.points||[]).length<3)return null;
           const color=twoDPalette[t.index%twoDPalette.length];
-          const active=hoverId===t.id||selectedId===t.id;
+          const active=hoverId===t.id;
           return <polygon
             key={t.id}
-            points={t.points.map(p=>`${Number(p.x)*100},${Number(p.y)*100}`).join(' ')}
-            fill={active?color.hover:color.fill}
-            stroke={active?color.stroke:'rgba(72,94,84,.55)'}
-            strokeWidth={active?.34:.18}
+            points={t.points.map(p=>`${Number(p.x)*(imageMeta.w||1600)},${Number(p.y)*(imageMeta.h||900)}`).join(' ')}
+            fill={active?color.hover:'rgba(0,0,0,0)'}
+            stroke={active?color.stroke:'rgba(0,0,0,0)'}
+            strokeWidth={active?3:0}
             vectorEffect="non-scaling-stroke"
+            pointerEvents="all"
             onMouseEnter={()=>setHoverId(t.id)}
             onMouseLeave={()=>setHoverId(null)}
             onClick={()=>clickTarget(t)}
           />
         })}
       </svg>
-      {targets.filter(t=>(t.points||[]).length>=3).map(t=>{
-        const xs=t.points.map(p=>Number(p.x)),ys=t.points.map(p=>Number(p.y));
-        const x=(Math.min(...xs)+Math.max(...xs))/2*100;
-        const y=(Math.min(...ys)+Math.max(...ys))/2*100;
-        return <button
-          key={`label-${t.id}`}
-          className={'two-d-map-label '+((hoverId===t.id||selectedId===t.id)?'active':'')}
-          style={{left:`${x}%`,top:`${y}%`}}
-          onMouseEnter={()=>setHoverId(t.id)}
-          onMouseLeave={()=>setHoverId(null)}
-          onClick={()=>clickTarget(t)}
-        ><b>{t.label}</b><small>{t.type==='floor'?`${t.raw.apartments?.filter(a=>a.status==='available').length||0} disponibile`:'Explorează'}</small></button>
-      })}
+
+      <div className={'two-d-bottom-tooltip '+(hoverTarget?'hovered':'')} style={tooltipStyle}>
+        {showingBuildingScene&&<button
+          className="two-d-back-button"
+          onClick={e=>{e.stopPropagation();onBackToOverview?.()}}
+          title="Înapoi la ansamblu"
+        ><i className="fa-solid fa-arrow-left"/><span>{building?.name}</span></button>}
+
+        <div className="two-d-bottom-tooltip-copy">
+          {hoverTarget?<>
+            <b>{hoverTarget.label}</b>
+            <span>{hoverStats.available} disponibile{hoverStats.total?` din ${hoverStats.total}`:''}</span>
+          </>:<>
+            <b>{showingBuildingScene?'Selectează un etaj':'Selectează un bloc'}</b>
+            <span>{showingBuildingScene?'Hover pe etaj pentru disponibilitate':'Hover pe clădire pentru detalii'}</span>
+          </>}
+        </div>
+      </div>
     </div>:<div className="two-d-public-missing">
       <i className="fa-regular fa-image"/>
       <b>Randarea 2D nu este disponibilă</b>
@@ -249,7 +300,6 @@ function TwoDViewer({project,building,activeFloor,onSelectBuilding,onSelectFloor
     </div>}
   </div>
 }
-
 
 function isMobileViewer(){
   return typeof window!=='undefined' && window.matchMedia?.('(max-width: 600px)')?.matches;
@@ -411,6 +461,12 @@ export default function EmbedApp(){
         setFloor(f);
         if(isMobileViewer())setMobileTab('floors');
       }}
+      onBackToOverview={()=>{
+        setBuildingId(null);
+        setActiveFloor(null);
+        setFloor(null);
+        if(isMobileViewer())setMobileTab('buildings');
+      }}
     />}
 
     <div className="macheta-brand">
@@ -510,9 +566,6 @@ export default function EmbedApp(){
         {building?'Hover + click pe etaj':'Hover + click pentru a selecta blocul'}
       </div>
     </>}
-    {visualView==='2d'&&<div className="macheta-hint macheta-hint-2d">
-      <i className="fa-regular fa-hand-pointer"/> {building?'Selectează un etaj din randare sau din listă':'Selectează un bloc din randare sau din listă'}
-    </div>}
 
     {floor&&<FloorOverlay floor={floor} onClose={()=>{setFloor(null);setActiveFloor(null)}} onApartment={setApartment}/>}
     {apartment&&<ApartmentCard a={apartment} onClose={()=>setApartment(null)}/>}

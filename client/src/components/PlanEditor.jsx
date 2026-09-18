@@ -254,7 +254,8 @@ export default function PlanEditor({
   selectedTargetId=null,
   onSelectedTargetChange=null,
   imageFlipH=null,
-  imageFlipV=null
+  imageFlipV=null,
+  perspectiveMode=false
 }){
   const holder=useRef();
   const stageRef=useRef();
@@ -279,7 +280,7 @@ export default function PlanEditor({
   const [mode,setMode]=useState('edit');
   const [busy,setBusy]=useState(false);
   const [notice,setNotice]=useState('');
-  const [snapOrtho,setSnapOrtho]=useState(true);
+  const [snapOrtho,setSnapOrtho]=useState(!perspectiveMode);
   const [snap45,setSnap45]=useState(false);
   const [snapVertices,setSnapVertices]=useState(true);
   const [snapEdit,setSnapEdit]=useState(false);
@@ -303,6 +304,12 @@ export default function PlanEditor({
   };
 
   useEffect(()=>{draftRef.current=draft},[draft]);
+
+  useEffect(()=>{
+    setSnapOrtho(!perspectiveMode);
+    setSnap45(false);
+    setSnapEdit(false);
+  },[perspectiveMode,sceneIdentity]);
 
   useEffect(()=>{
     const requested=selectedTargetId&&(entities||[]).some(e=>e.id===selectedTargetId)?selectedTargetId:null;
@@ -550,7 +557,7 @@ export default function PlanEditor({
   function copyCurrentPolygon(){
     const current=draftRef.current;
     if(!selected||current.length<3){
-      setNotice('Selectează un apartament care are deja poligon.');
+      setNotice(`Selectează un ${targetKind} care are deja poligon.`);
       return;
     }
     setCopiedPolygon({
@@ -569,11 +576,11 @@ export default function PlanEditor({
       return;
     }
     if(!selected){
-      setNotice('Selectează apartamentul țintă.');
+      setNotice(`Selectează ${targetKind} țintă.`);
       return;
     }
     if(selected.id===copiedPolygon.sourceId){
-      setNotice('Alege alt apartament ca țintă.');
+      setNotice(`Alege alt ${targetKind} ca țintă.`);
       return;
     }
 
@@ -614,11 +621,11 @@ export default function PlanEditor({
     if(mode!=='draw'||panWasDragging.current)return;
     if(e.target?.getClassName?.()==='Circle')return;
     const raw=pointerToNorm();
-    const force45=e?.evt?.shiftKey;
+    const force45=!perspectiveMode&&e?.evt?.shiftKey;
     const disableSnap=e?.evt?.altKey||e?.evt?.metaKey;
     const snapped=disableSnap?raw:applySnap(raw,draftRef.current,{
-      snapOrtho:snapOrtho||force45,
-      snap45:snap45||force45,
+      snapOrtho:perspectiveMode?false:(snapOrtho||force45),
+      snap45:perspectiveMode?false:(snap45||force45),
       snapVertices
     });
     recordUndo(draftRef.current);
@@ -631,9 +638,9 @@ export default function PlanEditor({
   }
 
   async function deleteSelectedPolygon(){
-    if(!selected){setNotice('Selectează un apartament.');return;}
+    if(!selected){setNotice(`Selectează un ${targetKind}.`);return;}
     const hasPolygon=draftRef.current.length>=3 || polygonPoints(selected).length>=3;
-    if(!hasPolygon){setNotice('Apartamentul selectat nu are poligon.');return;}
+    if(!hasPolygon){setNotice(`${entityLabel(selected)} nu are poligon.`);return;}
 
     const ok=await editorConfirm({
       title:`Șterge poligonul ${entityLabel(selected)}`,
@@ -668,7 +675,7 @@ export default function PlanEditor({
   }
 
   async function savePolygon(){
-    if(!selected){setNotice('Selectează un apartament.');return;}
+    if(!selected){setNotice(`Selectează un ${targetKind}.`);return;}
     if(draftRef.current.length<3){setNotice('Poligonul are nevoie de cel puțin 3 puncte.');return;}
     setBusy(true);setNotice('');
     try{
@@ -729,7 +736,7 @@ export default function PlanEditor({
     editGesture.current={type:'edge',index:i,startPointer,startDraft,orientation};
     setSelectedEdge(i);
     setSelectedVertex(null);
-    setStageCursor(orientation==='h'?'ns-resize':'ew-resize');
+    setStageCursor(perspectiveMode?'move':(orientation==='h'?'ns-resize':'ew-resize'));
   }
 
   function moveEditGesture(e){
@@ -742,11 +749,11 @@ export default function PlanEditor({
       const i=g.index;
       const current=draftRef.current;
       if(!current[i])return true;
-      const forceSnap=!!e?.evt?.shiftKey;
+      const forceSnap=!perspectiveMode&&!!e?.evt?.shiftKey;
       const disableSnap=!!(e?.evt?.altKey||e?.evt?.metaKey);
       let nextPoint=raw;
 
-      if((snapEdit||forceSnap)&&!disableSnap&&current.length>1){
+      if(!perspectiveMode&&(snapEdit||forceSnap)&&!disableSnap&&current.length>1){
         const prev=current[(i-1+current.length)%current.length];
         const next=current[(i+1)%current.length];
         const anchor=distance(raw,prev)<=distance(raw,next)?prev:next;
@@ -769,7 +776,16 @@ export default function PlanEditor({
       const j=(i+1)%arr.length;
       const a0=g.startDraft[i],b0=g.startDraft[j];
 
-      if(g.orientation==='h'){
+      if(perspectiveMode){
+        const requestedDx=raw.x-g.startPointer.x;
+        const requestedDy=raw.y-g.startPointer.y;
+        const minX=Math.min(a0.x,b0.x),maxX=Math.max(a0.x,b0.x);
+        const minY=Math.min(a0.y,b0.y),maxY=Math.max(a0.y,b0.y);
+        const dx=clamp(requestedDx,-minX,1-maxX);
+        const dy=clamp(requestedDy,-minY,1-maxY);
+        arr[i]=cleanPoint({x:a0.x+dx,y:a0.y+dy});
+        arr[j]=cleanPoint({x:b0.x+dx,y:b0.y+dy});
+      }else if(g.orientation==='h'){
         const base=(a0.y+b0.y)/2;
         const delta=raw.y-g.startPointer.y;
         const y=clamp01(base+delta);
@@ -815,8 +831,8 @@ export default function PlanEditor({
     editGesture.current=null;
     vertexDragging.current=false;
     if(g.type==='edge'){
-      setNotice('Latură mutată · geometria rămâne ortogonală');
-      setStageCursor(g.orientation==='h'?'ns-resize':'ew-resize');
+      setNotice(perspectiveMode?'Latură mutată · unghiul liber a fost păstrat':'Latură mutată · geometria rămâne ortogonală');
+      setStageCursor(perspectiveMode?'move':(g.orientation==='h'?'ns-resize':'ew-resize'));
     }else if(g.type==='polygon'){
       setNotice('Poligon mutat · salvează când poziția este corectă');
       setStageCursor(moveWhole?'move':'default');
@@ -834,9 +850,11 @@ export default function PlanEditor({
       setNotice('Poligonul trebuie să rămână cu minimum 3 puncte.');
       return;
     }
-    const next=deleteVertexAndHeal(current,index);
+    const next=perspectiveMode
+      ? current.filter((_,i)=>i!==index).map(cleanPoint)
+      : deleteVertexAndHeal(current,index);
     if(sameDraft(current,next)){
-      setNotice('Punctul nu a putut fi eliminat fără să strice poligonul.');
+      setNotice(perspectiveMode?'Punctul nu a putut fi eliminat.':'Punctul nu a putut fi eliminat fără să strice poligonul.');
       return;
     }
     recordUndo(current);
@@ -844,7 +862,7 @@ export default function PlanEditor({
     setDraft(next);
     setSelectedVertex(null);
     setSelectedEdge(null);
-    setNotice(`Punct șters real · ${current.length} → ${next.length} puncte`);
+    setNotice(perspectiveMode?`Punct șters · ${current.length} → ${next.length} puncte`:`Punct șters real · ${current.length} → ${next.length} puncte`);
   }
 
   return(
@@ -863,12 +881,15 @@ export default function PlanEditor({
           >Șterge poligon</button>
         </div>
 
-        <div className="segmented snap-controls">
+        {perspectiveMode?<div className="segmented snap-controls perspective-snap-controls">
+          <button className="active" disabled><i className="fa-solid fa-bezier-curve"/> Unghi liber</button>
+          <button className={snapVertices?'active':''} onClick={()=>setSnapVertices(v=>!v)}>Snap vertices</button>
+        </div>:<div className="segmented snap-controls">
           <button className={snapOrtho?'active':''} onClick={()=>setSnapOrtho(v=>!v)}>Snap 0/90°</button>
           <button className={snap45?'active':''} onClick={()=>setSnap45(v=>!v)}>45°</button>
           <button className={snapVertices?'active':''} onClick={()=>setSnapVertices(v=>!v)}>Vertices</button>
           <button className={snapEdit?'active':''} onClick={()=>setSnapEdit(v=>!v)}>Snap edit</button>
-        </div>
+        </div>}
 
         <button disabled={!undoCount} onClick={undoLastEdit}>Undo</button>
         <button disabled={selectedVertex===null||draft.length<=3} onClick={()=>deleteVertex(selectedVertex)}>Șterge punct</button>
@@ -1058,7 +1079,7 @@ export default function PlanEditor({
 
       <p className="hint">
         {genericMode
-          ? <>Acesta este <b>același motor de poligoane</b> folosit la planurile apartamentelor: selectare direct pe poligon, puncte și laturi editabile, Undo, Snap, Copy/Flip/Paste, dublu-click pentru punct nou și <b>Space + drag</b> pentru pan.</>
+          ? <><b>Instrucțiuni:</b> desenează punctele în jurul zonei dorite. {perspectiveMode?'Laturile pot avea orice unghi. ':''}Trage punctele sau laturile pentru ajustare. Dublu-click pe o latură adaugă un punct. <b>Space + drag</b> deplasează imaginea, iar <b>Ctrl/Cmd + Z</b> revine la pasul anterior.</>
           : <>Poți selecta apartamentul direct din listă sau prin <b>click pe poligon</b>. Pentru clonare pe același plan: selectează sursa,
           <b>Copiază poligon</b>, alege apartamentul țintă, opțional <b>Flip H</b>/<b>Flip V</b>, apoi <b>Lipește și mută</b>.
           După lipire, trage de <b>interiorul poligonului</b> ca să muți toată geometria; Flip-ul se face în jurul centrului propriei forme.

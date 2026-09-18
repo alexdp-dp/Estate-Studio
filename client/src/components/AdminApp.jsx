@@ -409,6 +409,7 @@ function Model({p,reload}){
           onSaveTargetPolygon={saveOverviewPolygon}
           onDeleteTargetPolygon={deleteOverviewPolygon}
           onChanged={reload}
+          perspectiveMode
         />
       </>}
 
@@ -441,6 +442,7 @@ function Model({p,reload}){
           onSaveTargetPolygon={saveFloorPolygon}
           onDeleteTargetPolygon={deleteFloorPolygon}
           onChanged={reload}
+          perspectiveMode
         />
       </>}
     </div>}

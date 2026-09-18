@@ -5246,3 +5246,163 @@ button.ui-action:hover,
     left:50%;
   }
 }
+
+
+/* ==========================================================================
+   04.6.1 — PERSPECTIVE POLYGONS (2D RENDERS ONLY)
+   ========================================================================== */
+.perspective-snap-controls button:first-child{
+  background:linear-gradient(100deg,#e5f5ed,#eee7fa)!important;
+  color:#5f5279!important;
+  opacity:1!important;
+}
+.perspective-snap-controls button:first-child i{
+  margin-right:5px;
+  color:#755f9c;
+}
+
+
+/* ==========================================================================
+   04.6.2 — 2D VIEWER FIT + HOVER-ONLY MAPPING
+   ========================================================================== */
+
+/* On desktop the render gets the whole viewer canvas. Existing navigation
+   floats above it instead of permanently stealing 285px from the image. */
+.two-d-public-viewer{
+  padding:58px 14px 14px!important;
+  align-items:stretch!important;
+  justify-content:stretch!important;
+}
+.two-d-public-stage{
+  width:100%!important;
+  height:100%!important;
+  max-width:none!important;
+  max-height:none!important;
+  display:block!important;
+  overflow:hidden!important;
+  border-radius:7px!important;
+  background:#e9efec!important;
+}
+.two-d-public-stage>img{
+  width:100%!important;
+  height:100%!important;
+  max-width:none!important;
+  max-height:none!important;
+  object-fit:contain!important;
+  object-position:center!important;
+}
+.two-d-public-stage>svg{
+  position:absolute!important;
+  inset:0!important;
+  width:100%!important;
+  height:100%!important;
+  z-index:2!important;
+}
+
+/* No mapping tint, outline or label in standby. Only the hovered target
+   becomes visible. The SVG still receives pointer events via transparent fill. */
+.two-d-public-stage polygon{
+  cursor:pointer!important;
+  transition:fill .12s ease,stroke .12s ease!important;
+}
+.two-d-map-label{
+  display:none!important;
+}
+
+/* Bottom helper/hover card is positioned from JS against the actual rendered
+   image rectangle, so it never falls outside a letterboxed render. */
+.two-d-bottom-tooltip{
+  position:absolute;
+  z-index:5;
+  transform:translate(-50%,-100%);
+  min-width:220px;
+  max-width:min(520px,70%);
+  min-height:42px;
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:6px 8px;
+  border:1px solid rgba(209,222,215,.96);
+  border-radius:7px;
+  background:rgba(255,255,255,.92);
+  color:#29483b;
+  box-shadow:0 9px 26px rgba(25,49,37,.14);
+  backdrop-filter:blur(10px);
+  line-height:1.1;
+  pointer-events:auto;
+}
+.two-d-bottom-tooltip.hovered{
+  background:linear-gradient(100deg,rgba(223,245,234,.95),rgba(238,229,255,.95));
+  border-color:#c6d6ce;
+}
+.two-d-bottom-tooltip-copy{
+  min-width:0;
+  flex:1;
+  display:grid;
+  justify-items:center;
+  gap:2px;
+  text-align:center;
+}
+.two-d-bottom-tooltip-copy b{
+  color:#29483b;
+  font-size:10px;
+  white-space:nowrap;
+}
+.two-d-bottom-tooltip-copy span{
+  color:#73837b;
+  font-size:8px;
+  white-space:nowrap;
+}
+.two-d-back-button{
+  height:30px;
+  max-width:145px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:0 8px;
+  border:1px solid #d6e1db;
+  border-radius:5px;
+  background:#fff;
+  color:#566b61;
+  font-size:8px;
+  font-weight:750;
+  cursor:pointer;
+}
+.two-d-back-button:hover{
+  background:#f3f8f5;
+  color:#29483b;
+}
+.two-d-back-button span{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+/* The render remains large on tablets too. */
+@media(max-width:1000px){
+  .two-d-public-viewer{
+    padding:58px 10px 126px!important;
+  }
+}
+@media(max-width:600px){
+  .two-d-public-viewer{
+    padding:104px 8px 164px!important;
+  }
+  .two-d-public-stage>img{
+    max-height:none!important;
+  }
+  .two-d-bottom-tooltip{
+    min-width:190px;
+    max-width:88%;
+    min-height:38px;
+  }
+  .two-d-back-button{
+    max-width:105px;
+  }
+}
+
+/* Generic 2D mapping instructions should read as instructions, not implementation notes. */
+.polygon-workspace>.hint{
+  color:#718078;
+  line-height:1.5;
+}
