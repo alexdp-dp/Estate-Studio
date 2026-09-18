@@ -533,11 +533,11 @@ function Plans({p,reload}){
             <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadPlan(e.target.files[0])}/>
             {f.plan_path?'Înlocuiește planul':'Încarcă planul'}
           </label>
-          {f.plan_path&&<button className="ui-action" onClick={()=>setAutoOpen(true)}>✦ Detectează apartamente</button>}
-          {f.plan_path&&(f.apartments||[]).length>0&&<button className="ui-action" onClick={()=>setCopyLayoutOpen(true)}>Copiază plan + mapare</button>}
-          <button className="primary" onClick={()=>setNewOpen(true)}>＋ Apartament</button>
-          {(f.plan_path||(f.apartments||[]).length>0)&&<button className="ui-action destructive-plan-action" onClick={deleteCurrentFloorPlanData}>Șterge plan etaj</button>}
-          {(p.buildings||[]).some(bb=>(bb.floors||[]).some(ff=>ff.plan_path||(ff.apartments||[]).length>0))&&<button className="ui-action destructive-plan-action" onClick={deleteAllProjectPlanData}>Șterge toate planurile</button>}
+          {f.plan_path&&<button className="ui-action plan-action detect-action" onClick={()=>setAutoOpen(true)}>✦ Detectează apartamente</button>}
+          {f.plan_path&&(f.apartments||[]).length>0&&<button className="ui-action plan-action copy-action" onClick={()=>setCopyLayoutOpen(true)}>Copiază plan + mapare</button>}
+          <button className="primary plan-action add-action" onClick={()=>setNewOpen(true)}>＋ Apartament</button>
+          {(f.plan_path||(f.apartments||[]).length>0)&&<button className="ui-action plan-action destructive-plan-action" onClick={deleteCurrentFloorPlanData}>Șterge plan etaj</button>}
+          {(p.buildings||[]).some(bb=>(bb.floors||[]).some(ff=>ff.plan_path||(ff.apartments||[]).length>0))&&<button className="ui-action plan-action destructive-plan-action all-plans-action" onClick={deleteAllProjectPlanData}>Șterge toate planurile</button>}
         </div>
       </div>
 

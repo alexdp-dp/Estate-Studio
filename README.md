@@ -1,3 +1,44 @@
+# Estate Studio — Build 04.5.2 Floor Table + Palette
+
+Build cumulativ peste 04.5.1.
+
+## Backend — Planuri & apartamente
+- cardul etajului activ are padding real, textul nu mai stă lipit de margine;
+- acțiunile folosesc pasteluri din paleta de referință:
+  - Detectează apartamente → lilac;
+  - Copiază plan + mapare → pale blue;
+  - Apartament nou → mint;
+  - Șterge plan etaj → soft red;
+  - Șterge toate planurile → soft yellow;
+- headerul cardului folosește discret mint / lilac / blue / yellow.
+
+## Frontend — plan etaj
+Layout nou desktop:
+- aproximativ 2/3 planul în stânga;
+- aproximativ 1/3 tabelul apartamentelor în dreapta;
+- eliminat strip-ul de carduri scrollabile de sub plan.
+
+Tabelul conține:
+- Cod;
+- Denumire;
+- Camere;
+- Suprafață;
+- Preț;
+- Disponibilitate.
+
+Tabelul are scroll vertical permanent și scrollbar vizibil.
+
+Hover pe un rând:
+- colorează discret rândul în funcție de tipologia apartamentului;
+- evidențiază simultan poligonul corespunzător pe hartă;
+- nu declanșează tooltipul flotant.
+
+Click pe rând deschide în continuare detaliile apartamentului.
+
+Pe tabletă / mobil, planul și tabelul se stivuiesc pentru a nu înghesui coloanele.
+
+`/api/version` => `04.5.2-floor-table-palette`
+
 # Estate Studio — Build 04.5.1 Rectangular UI CSS Pass
 
 Hotfix vizual peste 04.5.0. Logica aplicației nu este modificată.

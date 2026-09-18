@@ -21,6 +21,7 @@ function roomColorClass(a){
 }
 function FloorOverlay({floor,onClose,onApartment}){
   const [hover,setHover]=useState(null);
+  const [rowHoverId,setRowHoverId]=useState(null);
   const [planZoom,setPlanZoom]=useState(1);
   const planViewport=useRef(null);
 
@@ -49,38 +50,68 @@ function FloorOverlay({floor,onClose,onApartment}){
 
   return <div className="embed-overlay"><div className="floor-sheet"><button className="sheet-close" onClick={onClose}>×</button>
     <div className="sheet-head"><div><span>PLAN ETAJ</span><h2>{floor.name}</h2></div><div className="legend room-legend"><i className="studio"/>Studio <i className="room2"/>2 camere <i className="room3"/>3 camere <i className="room4"/>4 camere <i className="reserved"/>Rezervat <i className="sold"/>Vândut</div></div>
-    <div className="plan-public" ref={planViewport}>
-      {floor.plan_path&&<div className="plan-zoom-controls">
-        <button disabled={planZoom<=1} onClick={()=>setPlanZoom(z=>Math.max(1,+(z-.1).toFixed(2)))} aria-label="Micșorează planul">−</button>
-        <span>{Math.round(planZoom*100)}%</span>
-        <button disabled={planZoom>=1.5} onClick={()=>setPlanZoom(z=>Math.min(1.5,+(z+.1).toFixed(2)))} aria-label="Mărește planul">＋</button>
-      </div>}
-      {floor.plan_path?<div
-        className="plan-image-wrap"
-        style={{width:`${planZoom*100}%`}}
-        onDoubleClick={()=>setPlanZoom(z=>z>1?1:1.5)}
-      ><img
-      src={floor.plan_path}
-      style={{
-        transform:`scaleX(${floor?.settings?.plan_flip_h?-1:1}) scaleY(${floor?.settings?.plan_flip_v?-1:1})`,
-        transformOrigin:'center center'
-      }}
-    /><svg viewBox="0 0 100 100" preserveAspectRatio="none">
-      {(floor.apartments||[]).map(a=>{
-        const ps=polygonPoints(a);
-        if(ps.length<=2)return null;
-        return <polygon
-          key={a.id}
-          className={`${a.status}${roomColorClass(a)}${hover?.a?.id===a.id?' hovered':''}`}
-          points={ps.map(p=>`${p.x*100},${p.y*100}`).join(' ')}
-          onMouseEnter={e=>hoverApartment(a,e)}
-          onMouseMove={e=>hoverApartment(a,e)}
-          onMouseLeave={()=>setHover(null)}
-          onClick={()=>onApartment(a)}
-        />
-      })}
-    </svg></div>:<div className="plan-missing">Planul etajului nu este încărcat.</div>}</div>
-    <div className="apartments-strip">{(floor.apartments||[]).map(a=><button key={a.id} onMouseEnter={e=>hoverApartment(a,e)} onMouseMove={e=>hoverApartment(a,e)} onMouseLeave={()=>setHover(null)} onClick={()=>onApartment(a)}><b>{a.code}</b><span>{a.rooms?`${a.rooms} camere · `:''}{a.usable_area_sqm?`${a.usable_area_sqm} m² · `:''}{statusLabel[a.status]}</span></button>)}</div>
+    <div className="floor-main-grid">
+      <div className="plan-public" ref={planViewport}>
+        {floor.plan_path&&<div className="plan-zoom-controls">
+          <button disabled={planZoom<=1} onClick={()=>setPlanZoom(z=>Math.max(1,+(z-.1).toFixed(2)))} aria-label="Micșorează planul">−</button>
+          <span>{Math.round(planZoom*100)}%</span>
+          <button disabled={planZoom>=1.5} onClick={()=>setPlanZoom(z=>Math.min(1.5,+(z+.1).toFixed(2)))} aria-label="Mărește planul">＋</button>
+        </div>}
+        {floor.plan_path?<div
+          className="plan-image-wrap"
+          style={{width:`${planZoom*100}%`}}
+          onDoubleClick={()=>setPlanZoom(z=>z>1?1:1.5)}
+        ><img
+        src={floor.plan_path}
+        style={{
+          transform:`scaleX(${floor?.settings?.plan_flip_h?-1:1}) scaleY(${floor?.settings?.plan_flip_v?-1:1})`,
+          transformOrigin:'center center'
+        }}
+      /><svg viewBox="0 0 100 100" preserveAspectRatio="none">
+        {(floor.apartments||[]).map(a=>{
+          const ps=polygonPoints(a);
+          if(ps.length<=2)return null;
+          return <polygon
+            key={a.id}
+            className={`${a.status}${roomColorClass(a)}${(hover?.a?.id===a.id||rowHoverId===a.id)?' hovered':''}`}
+            points={ps.map(p=>`${p.x*100},${p.y*100}`).join(' ')}
+            onMouseEnter={e=>hoverApartment(a,e)}
+            onMouseMove={e=>hoverApartment(a,e)}
+            onMouseLeave={()=>setHover(null)}
+            onClick={()=>onApartment(a)}
+          />
+        })}
+      </svg></div>:<div className="plan-missing">Planul etajului nu este încărcat.</div>}
+      </div>
+
+      <aside className="floor-apartment-panel">
+        <div className="floor-apartment-panel-head">
+          <div><small>INVENTAR ETAJ</small><b>Apartamente</b></div>
+          <span>{(floor.apartments||[]).length}</span>
+        </div>
+        <div className="floor-apartment-table-head">
+          <span>Cod</span><span>Denumire</span><span>Cam.</span><span>Suprafață</span><span>Preț</span><span>Status</span>
+        </div>
+        <div className="floor-apartment-table-scroll">
+          {(floor.apartments||[]).map(a=><button
+            key={a.id}
+            className={`floor-apartment-row${roomColorClass(a)}`}
+            onMouseEnter={()=>setRowHoverId(a.id)}
+            onMouseLeave={()=>setRowHoverId(null)}
+            onFocus={()=>setRowHoverId(a.id)}
+            onBlur={()=>setRowHoverId(null)}
+            onClick={()=>onApartment(a)}
+          >
+            <b className="apt-code">{a.code}</b>
+            <span className="apt-name">{a.title||'Apartament'}</span>
+            <span className={'room-cell'+roomColorClass(a)}>{a.rooms||'—'}</span>
+            <span>{a.usable_area_sqm?`${a.usable_area_sqm} m²`:a.total_area_sqm?`${a.total_area_sqm} m²`:'—'}</span>
+            <span className="apt-price">{priceText(a)||'—'}</span>
+            <span className={'status-pill '+a.status}>{statusLabel[a.status]}</span>
+          </button>)}
+        </div>
+      </aside>
+    </div>
 
     {hover&&<div className="apartment-hover-tooltip" style={{left:Math.min(window.innerWidth-285,hover.x+15),top:Math.min(window.innerHeight-205,hover.y+15)}}>
       <div className="apt-tip-head"><div><small>{hover.a.code}</small><b>{hover.a.title||'Apartament'}</b></div><span className={'status-pill '+hover.a.status}>{statusLabel[hover.a.status]}</span></div>

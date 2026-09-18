@@ -3411,3 +3411,344 @@ button.ui-action.destructive-plan-action{
     flex-wrap:wrap!important;
   }
 }
+
+
+/* ==========================================================================
+   04.5.2 — FLOOR INVENTORY TABLE + PALETTE ACCENTS
+   ========================================================================== */
+
+/* Backend floor summary: give the text real breathing room. */
+.plan-head{
+  position:relative;
+  padding:16px 18px !important;
+  overflow:hidden;
+  background:
+    linear-gradient(90deg,rgba(223,245,234,.72) 0 31%,rgba(238,229,255,.50) 31% 54%,rgba(220,236,255,.42) 54% 76%,rgba(255,244,189,.28) 76% 100%),
+    #fff !important;
+}
+.plan-head::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+  width:4px;
+  background:#0e9471;
+}
+.plan-head>div:first-child{
+  padding-left:3px;
+}
+.plan-head h3{margin:0 0 4px!important}
+.plan-head p{margin:0!important}
+
+/* More of the reference palette, but still controlled and functional. */
+.plan-head .detect-action{
+  background:#f0e9ff!important;
+  border-color:#d9caf7!important;
+  color:#6d52a4!important;
+}
+.plan-head .detect-action:hover{
+  background:#e8ddff!important;
+  border-color:#cdb8f2!important;
+}
+.plan-head .copy-action{
+  background:#e8f2ff!important;
+  border-color:#cddff5!important;
+  color:#4778a8!important;
+}
+.plan-head .copy-action:hover{
+  background:#dcecff!important;
+  border-color:#bad2ef!important;
+}
+.plan-head .add-action{
+  background:#ddf5e8!important;
+  border-color:#bfe8d2!important;
+  color:#087354!important;
+  box-shadow:none!important;
+}
+.plan-head .add-action:hover{
+  background:#d0eedf!important;
+  border-color:#a9dcc2!important;
+}
+.plan-head .destructive-plan-action{
+  background:#fff2f2!important;
+  border-color:#ebcaca!important;
+  color:#a43c3c!important;
+}
+.plan-head .all-plans-action{
+  background:#fff7df!important;
+  border-color:#efdfa8!important;
+  color:#8e6818!important;
+}
+.plan-head .all-plans-action:hover{
+  background:#fff1c9!important;
+  border-color:#e5cd7d!important;
+}
+
+/* Subtle color accents elsewhere in the admin. */
+.section-head>div:first-child>small{
+  display:inline-block;
+  width:max-content;
+  padding:4px 6px;
+  border-radius:4px;
+  background:#e7f5ee;
+  color:#0b7657;
+}
+.apartment-table .tr.th{
+  background:linear-gradient(90deg,#eff8f4,#f4f1fb,#eff5fc)!important;
+}
+.floor-generator{
+  border-top:3px solid #b8e6cf!important;
+}
+
+/* ---------- Public floor plan: 2/3 map + 1/3 table ---------- */
+.floor-sheet{
+  width:min(1480px,96vw)!important;
+  height:min(860px,92vh)!important;
+}
+.floor-main-grid{
+  flex:1;
+  min-height:0;
+  display:grid;
+  grid-template-columns:minmax(0,2fr) minmax(390px,1fr);
+  gap:12px;
+}
+.floor-main-grid>.plan-public{
+  min-width:0;
+  min-height:0;
+  height:100%;
+}
+.floor-apartment-panel{
+  min-width:0;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  border:1px solid #dce6e1;
+  border-radius:7px;
+  background:#fff;
+}
+.floor-apartment-panel-head{
+  min-height:56px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:11px 12px;
+  border-bottom:1px solid #e3eae6;
+  background:
+    linear-gradient(90deg,rgba(223,245,234,.92),rgba(220,236,255,.64) 58%,rgba(238,229,255,.58));
+}
+.floor-apartment-panel-head>div{
+  display:grid;
+  gap:1px;
+}
+.floor-apartment-panel-head small{
+  color:#718279;
+  font-size:7px;
+  font-weight:800;
+  letter-spacing:.13em;
+}
+.floor-apartment-panel-head b{
+  color:#17251d;
+  font-size:14px;
+  letter-spacing:-.02em;
+}
+.floor-apartment-panel-head>span{
+  min-width:30px;
+  height:26px;
+  display:grid;
+  place-items:center;
+  border-radius:5px;
+  background:#fff;
+  color:#087557;
+  font-size:10px;
+  font-weight:800;
+  border:1px solid #c9dfd4;
+}
+
+.floor-apartment-table-head,
+.floor-apartment-row{
+  display:grid;
+  grid-template-columns:52px minmax(92px,1.35fr) 46px 64px 80px 82px;
+  gap:5px;
+  align-items:center;
+}
+.floor-apartment-table-head{
+  flex:0 0 auto;
+  min-height:35px;
+  padding:0 8px;
+  border-bottom:1px solid #e5ebe8;
+  background:#f7faf8;
+  color:#87958d;
+  font-size:7px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.055em;
+}
+.floor-apartment-table-scroll{
+  flex:1;
+  min-height:0;
+  overflow-y:scroll;
+  overflow-x:auto;
+  scrollbar-gutter:stable;
+  scrollbar-width:auto;
+  scrollbar-color:#9db8ab #edf3f0;
+}
+.floor-apartment-table-scroll::-webkit-scrollbar{
+  width:10px;
+  height:9px;
+}
+.floor-apartment-table-scroll::-webkit-scrollbar-track{
+  background:#edf3f0;
+  border-left:1px solid #e1e9e5;
+}
+.floor-apartment-table-scroll::-webkit-scrollbar-thumb{
+  background:#9db8ab;
+  border:2px solid #edf3f0;
+  border-radius:5px;
+}
+.floor-apartment-table-scroll::-webkit-scrollbar-thumb:hover{
+  background:#789b8a;
+}
+.floor-apartment-row{
+  position:relative;
+  width:100%;
+  min-width:416px;
+  min-height:48px;
+  padding:6px 8px;
+  border:0;
+  border-bottom:1px solid #ebf0ed;
+  background:#fff;
+  color:#34423b;
+  text-align:left;
+  font-size:8px;
+  cursor:pointer;
+}
+.floor-apartment-row::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+  width:3px;
+  background:#c7d4ce;
+  opacity:0;
+}
+.floor-apartment-row:hover,
+.floor-apartment-row:focus-visible{
+  outline:none;
+  background:#f5faf7;
+}
+.floor-apartment-row:hover::before,
+.floor-apartment-row:focus-visible::before{
+  opacity:1;
+}
+.floor-apartment-row.rooms-studio::before{background:#9ac99b}
+.floor-apartment-row.rooms-2::before{background:#8a73b8}
+.floor-apartment-row.rooms-3::before{background:#356b57}
+.floor-apartment-row.rooms-4::before{background:#3f7c87}
+.floor-apartment-row .apt-code{
+  color:#17251d;
+  font-size:9px;
+  white-space:nowrap;
+}
+.floor-apartment-row .apt-name{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#65736c;
+}
+.floor-apartment-row .apt-price{
+  color:#24372d;
+  font-weight:700;
+  white-space:nowrap;
+}
+.floor-apartment-row .status-pill{
+  justify-self:start;
+  padding:4px 6px;
+  font-size:7px;
+  white-space:nowrap;
+}
+.room-cell{
+  width:27px;
+  height:24px;
+  display:grid;
+  place-items:center;
+  border-radius:4px;
+  font-weight:800;
+  color:#44524b;
+  background:#eef2f0;
+}
+.room-cell.rooms-studio{background:#e0f0dd;color:#4b7650}
+.room-cell.rooms-2{background:#eee8fa;color:#71579d}
+.room-cell.rooms-3{background:#dcebe4;color:#285c47}
+.room-cell.rooms-4{background:#dcecf0;color:#306b77}
+
+/* Hovering a table row highlights the corresponding polygon using the same
+   hover state as the map, without showing a floating tooltip. */
+.floor-apartment-row.rooms-studio:hover{background:#f1f8ef}
+.floor-apartment-row.rooms-2:hover{background:#f6f2fb}
+.floor-apartment-row.rooms-3:hover{background:#edf5f1}
+.floor-apartment-row.rooms-4:hover{background:#eff7f8}
+
+/* Remove the old bottom card strip completely in the new layout. */
+.floor-sheet>.apartments-strip{display:none!important}
+
+/* Give the room legend a slightly more colorful, reference-like treatment. */
+.room-legend i.studio{background:#9fcea0}
+.room-legend i.room2{background:#8a73b8}
+.room-legend i.room3{background:#356b57}
+.room-legend i.room4{background:#3f7c87}
+.room-legend i.reserved{background:#e5a12a}
+.room-legend i.sold{background:#d94b4b}
+
+/* Keep plan overlay and map aligned at every zoom level. */
+.floor-main-grid .plan-public .plan-image-wrap{
+  position:relative;
+}
+.floor-main-grid .plan-public .plan-image-wrap>img{
+  display:block;
+  width:100%;
+  height:auto;
+}
+.floor-main-grid .plan-public .plan-image-wrap>svg{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+}
+
+/* Tablet / mobile: stack instead of squeezing six table columns into 1/3. */
+@media(max-width:980px){
+  .floor-main-grid{
+    grid-template-columns:1fr;
+    grid-template-rows:minmax(0,1fr) 245px;
+  }
+  .floor-apartment-panel{
+    min-height:0;
+  }
+}
+@media(max-width:600px){
+  .floor-sheet{
+    width:calc(100vw - 20px)!important;
+    height:min(92dvh,820px)!important;
+  }
+  .floor-main-grid{
+    grid-template-rows:minmax(0,1fr) 220px;
+    gap:8px;
+  }
+  .floor-apartment-panel-head{
+    min-height:44px;
+    padding:8px 10px;
+  }
+  .floor-apartment-table-head,
+  .floor-apartment-row{
+    grid-template-columns:50px minmax(88px,1.2fr) 43px 62px 76px 78px;
+  }
+  .floor-apartment-row{
+    min-width:400px;
+    min-height:44px;
+  }
+}
