@@ -1,6 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {useParams} from 'react-router-dom';
-import {api,statusLabel} from '../api';
+import {api,slugify,statusLabel} from '../api';
 import ThreeViewer from './ThreeViewer';
 
 function polygonPoints(apartment){
@@ -18,6 +18,57 @@ function roomColorClass(a){
   if(rooms===3)return ' rooms-3';
   if(rooms>=4)return ' rooms-4';
   return ' rooms-other';
+}
+
+function entityDeepSlug(entity,type){
+  if(type==='apartment')return slugify(entity?.code||entity?.title||'');
+  return slugify(entity?.name||'');
+}
+function deepAliases(entity){
+  return Array.isArray(entity?.settings?.deep_link_aliases)?entity.settings.deep_link_aliases.map(slugify).filter(Boolean):[];
+}
+function matchesDeepLink(entity,value,type){
+  const wanted=slugify(value||'');
+  if(!wanted)return false;
+  return entityDeepSlug(entity,type)===wanted||deepAliases(entity).includes(wanted);
+}
+function resolveDeepLink(project,search){
+  const params=new URLSearchParams(search||'');
+  const buildingValue=params.get('building');
+  const floorValue=params.get('floor');
+  const apartmentValue=params.get('apartment');
+  const buildings=project?.buildings||[];
+
+  let building=buildingValue?buildings.find(b=>matchesDeepLink(b,buildingValue,'building')):null;
+  let floor=null,apartment=null;
+
+  if(apartmentValue){
+    const buildingPool=building?[building]:buildings;
+    outer:
+    for(const b of buildingPool){
+      const floorPool=floorValue
+        ? (b.floors||[]).filter(f=>matchesDeepLink(f,floorValue,'floor'))
+        : (b.floors||[]);
+      for(const f of floorPool){
+        const a=(f.apartments||[]).find(ap=>matchesDeepLink(ap,apartmentValue,'apartment'));
+        if(a){building=b;floor=f;apartment=a;break outer}
+      }
+    }
+  }
+
+  if(!floor&&floorValue){
+    if(building){
+      floor=(building.floors||[]).find(f=>matchesDeepLink(f,floorValue,'floor'))||null;
+    }else{
+      const matches=[];
+      for(const b of buildings){
+        for(const f of b.floors||[])if(matchesDeepLink(f,floorValue,'floor'))matches.push({b,f});
+      }
+      if(matches.length===1){building=matches[0].b;floor=matches[0].f}
+    }
+  }
+
+  return {building,floor,apartment};
 }
 function FloorOverlay({floor,onClose,onApartment}){
   const [hover,setHover]=useState(null);
@@ -201,8 +252,27 @@ export default function EmbedApp(){
   const [mobileTab,setMobileTab]=useState('buildings');
 
   useEffect(()=>{
-    const preview=new URLSearchParams(window.location.search).get('preview')==='1';
-    api(`/public/projects/${slug}${preview?'?preview=1':''}`).then(p=>{setProject(p);setBuildingId(null)}).catch(e=>setError(e.message));
+    const query=new URLSearchParams(window.location.search);
+    const preview=query.get('preview')==='1';
+    api(`/public/projects/${slug}${preview?'?preview=1':''}`).then(p=>{
+      setProject(p);
+      const deep=resolveDeepLink(p,window.location.search);
+      if(deep.building){
+        setBuildingId(deep.building.id);
+        if(isMobileViewer())setMobileTab(deep.floor?'floors':'floors');
+      }else{
+        setBuildingId(null);
+        if(isMobileViewer())setMobileTab('buildings');
+      }
+      if(deep.floor){
+        setActiveFloor(deep.floor);
+        setFloor(deep.floor);
+      }else{
+        setActiveFloor(null);
+        setFloor(null);
+      }
+      setApartment(deep.apartment||null);
+    }).catch(e=>setError(e.message));
   },[slug]);
 
   const building=project?.buildings?.find(b=>b.id===buildingId)||null;

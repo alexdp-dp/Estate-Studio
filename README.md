@@ -1,3 +1,52 @@
+# Estate Studio — Build 04.5.7 Deep Links
+
+Build cumulativ peste 04.5.6.
+
+## Deep linking public
+Viewerul poate fi deschis direct pe:
+- bloc: `?building=bloc-3`
+- etaj: `?building=bloc-3&floor=etaj-4`
+- apartament: `?building=bloc-3&floor=etaj-4&apartment=p405`
+
+Pentru apartamente este acceptată și rezolvarea directă după `apartment=` dacă slug-ul este unic în proiect.
+
+Frontend-ul final NU afișează butoane de copiere sau informații despre deep links.
+
+## URL public client
+În `General` există câmpul:
+`URL public al paginii cu embed`
+
+Exemplu:
+`https://client.ro/apartamente`
+
+Linkurile generate în admin folosesc acest domeniu / această pagină, nu URL-ul Estate Studio.
+
+## Slug-uri
+Slug-urile sunt generate automat:
+- bloc → din numele blocului;
+- etaj → din numele etajului;
+- apartament → din codul apartamentului (fallback titlu).
+
+La redenumire, vechiul slug este păstrat automat în `settings.deep_link_aliases`, astfel încât linkurile vechi continuă să funcționeze.
+
+## Copiază link în backend
+- Blocuri → link per bloc;
+- Etaje → link per etaj;
+- Planuri & apartamente → link per apartament;
+- pagina nouă `Linkuri publice` → inventar complet al tuturor linkurilor proiectului.
+
+## Embed inteligent
+Pagina `Embed` generează acum un snippet care citește din URL-ul paginii clientului doar:
+- `building`
+- `floor`
+- `apartment`
+
+și le transmite iframe-ului Estate Studio.
+
+Parametrii UTM nu sunt modificați și nu sunt trimiși automat către Estate Studio.
+
+`/api/version` => `04.5.7-deep-links`
+
 # Estate Studio — Build 04.5.6 Static Dashboard
 
 Build cumulativ peste 04.5.5.

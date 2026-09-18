@@ -4658,3 +4658,258 @@ button.ui-action:hover,
 /* No monthly-growth semantics on this dashboard for now. */
 .dashboard-kpi-card .delta{display:none!important}
 .dashboard-data-note{display:none!important}
+
+
+/* ==========================================================================
+   04.5.7 — DEEP LINK ADMIN
+   ========================================================================== */
+
+.public-page-url-field small{
+  color:#7d8b84;
+  font-size:9px;
+  font-weight:500;
+  line-height:1.4;
+}
+
+.copy-link-button,
+.mini-link-button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  white-space:nowrap;
+}
+.copy-link-button i,
+.mini-link-button i{
+  color:#755f9c;
+}
+.mini-link-button{
+  min-height:30px;
+  padding:0 8px;
+  border:1px solid #d6e0db;
+  border-radius:5px;
+  background:#fff;
+  color:#53675e;
+  font-size:9px;
+  font-weight:700;
+}
+.mini-link-button:hover{
+  background:linear-gradient(100deg,#eef8f3,#f4effc);
+  border-color:#c7d7cf;
+}
+
+/* Buildings have one extra utility action. */
+.building-row{
+  grid-template-columns:55px 2fr repeat(3,1fr) auto auto!important;
+}
+.shared-building-row{
+  grid-template-columns:55px 2fr 1fr 1fr auto auto!important;
+}
+
+/* Floors table gets a dedicated Link column. */
+.floor-links-table .tr{
+  grid-template-columns:1.3fr .8fr .8fr .45fr .75fr!important;
+}
+.floor-links-table .mini-link-button{
+  width:max-content;
+}
+
+/* Apartment table accommodates Link + Edit + Delete actions. */
+.apartment-table .tr{
+  grid-template-columns:.8fr .9fr .55fr .85fr 1.65fr!important;
+}
+.apartment-table .row-actions{
+  flex-wrap:wrap;
+}
+
+/* Smart embed explanation. */
+.embed-deeplink-notice{
+  margin-top:12px;
+}
+
+/* Central public-links page */
+.public-links-empty>i{
+  font-size:27px;
+  color:#876fae;
+  margin-bottom:3px;
+}
+.public-link-summary{
+  display:grid;
+  grid-template-columns:1.7fr .65fr .9fr;
+  gap:12px;
+  margin-bottom:15px;
+  background:linear-gradient(100deg,#f4faf7,#f7f3fc);
+}
+.public-link-summary>div{
+  display:grid;
+  gap:4px;
+}
+.public-link-summary small{
+  color:#87958d;
+  font-size:7px;
+  font-weight:800;
+  letter-spacing:.11em;
+}
+.public-link-summary b{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  color:#29483b;
+  font-size:11px;
+}
+
+.public-links-tree{
+  display:grid;
+  gap:14px;
+}
+.public-link-building{
+  padding:0!important;
+  overflow:hidden;
+}
+.public-link-building-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:14px 16px;
+  border-bottom:1px solid #e2e9e5;
+  background:linear-gradient(100deg,#e7f6ee,#f0e9fb);
+}
+.public-link-building-head small{
+  color:#71827a;
+  font-size:7px;
+  font-weight:800;
+  letter-spacing:.1em;
+}
+.public-link-building-head h3{
+  margin:3px 0 0;
+  color:#29483b;
+  font-size:16px;
+}
+.public-link-actions{
+  min-width:0;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+}
+.public-link-actions code{
+  max-width:520px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#64746c;
+  font-size:9px;
+}
+.public-link-floor-list{
+  display:grid;
+}
+.public-link-floor{
+  border-bottom:1px solid #edf1ef;
+}
+.public-link-floor:last-child{
+  border-bottom:0;
+}
+.public-link-floor-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  min-height:48px;
+  padding:8px 14px;
+  background:#fbfcfb;
+}
+.public-link-floor-head>div:first-child{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:190px;
+}
+.public-link-floor-head i{
+  color:#6d8a7c;
+}
+.public-link-floor-head span{
+  color:#30473d;
+  font-size:10px;
+  font-weight:750;
+}
+.public-link-floor-head small{
+  color:#98a39e;
+  font-size:8px;
+}
+.public-link-apartments{
+  display:grid;
+  padding:0 14px 10px 38px;
+}
+.public-link-apartment{
+  display:grid;
+  grid-template-columns:minmax(140px,.8fr) minmax(260px,1.8fr) auto;
+  gap:10px;
+  align-items:center;
+  min-height:40px;
+  padding:5px 0;
+  border-top:1px solid #f0f3f1;
+}
+.public-link-apartment>div:first-child{
+  min-width:0;
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:2px 7px;
+  align-items:center;
+}
+.public-link-apartment b{
+  color:#29483b;
+  font-size:9px;
+}
+.public-link-apartment span{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#687870;
+  font-size:9px;
+}
+.public-link-apartment small{
+  grid-column:1/-1;
+  color:#9aa59f;
+  font-size:7px;
+}
+.public-link-apartment code{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#78877f;
+  font-size:8px;
+}
+.public-links-note{
+  margin-top:14px;
+}
+
+@media(max-width:1000px){
+  .building-row,
+  .shared-building-row{
+    grid-template-columns:45px 1.6fr 1fr auto auto!important;
+  }
+  .public-link-summary{
+    grid-template-columns:1fr;
+  }
+}
+@media(max-width:760px){
+  .public-link-building-head,
+  .public-link-floor-head{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+  .public-link-actions{
+    width:100%;
+    justify-content:space-between;
+  }
+  .public-link-actions code{
+    max-width:70%;
+  }
+  .public-link-apartment{
+    grid-template-columns:1fr auto;
+  }
+  .public-link-apartment code{
+    grid-column:1/-1;
+  }
+}

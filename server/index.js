@@ -15,8 +15,20 @@ const ADMIN_USER='alexdarie', ADMIN_HASH='pbkdf2_sha256$210000$lM6qBN+L6b1Vqcj0u
 function verifyPassword(password,record){const [,it,salt64,hash64]=record.split('$');const got=crypto.pbkdf2Sync(password,Buffer.from(salt64,'base64'),Number(it),32,'sha256');return crypto.timingSafeEqual(got,Buffer.from(hash64,'base64'))}
 function auth(req,res,next){try{req.user=jwt.verify(req.cookies.es_token,JWT_SECRET);next()}catch{res.status(401).json({error:'Unauthorized'})}}
 function clean(o,allowed){return Object.fromEntries(Object.entries(o||{}).filter(([k])=>allowed.includes(k)))}
+
+function deepSlug(v=''){
+  return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'').slice(0,80);
+}
+function withDeepLinkAlias(settings,oldValue,newValue){
+  const next={...(settings||{})};
+  const oldSlug=deepSlug(oldValue),newSlug=deepSlug(newValue);
+  const aliases=new Set(Array.isArray(next.deep_link_aliases)?next.deep_link_aliases.map(deepSlug).filter(Boolean):[]);
+  if(oldSlug&&oldSlug!==newSlug)aliases.add(oldSlug);
+  next.deep_link_aliases=[...aliases].filter(x=>x&&x!==newSlug);
+  return next;
+}
 function send(res,data,error,status=500){if(error)return res.status(status).json({error:error.message||String(error)});res.json(data)}
-app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.5.6-static-dashboard',time:'2026-09-14'}));
+app.get('/api/version',(req,res)=>res.json({app:'estate-studio',build:'04.5.7-deep-links',time:'2026-09-14'}));
 app.get('/api/health',async(req,res)=>{const {error}=await sb.from('projects').select('id',{head:true,count:'exact'});res.status(error?500:200).json({ok:!error,supabase:!error,error:error?.message})});
 app.post('/api/auth/login',(req,res)=>{if(req.body?.username===ADMIN_USER&&verifyPassword(String(req.body?.password||''),ADMIN_HASH)){const token=jwt.sign({sub:ADMIN_USER},JWT_SECRET,{expiresIn:'24h'});res.cookie('es_token',token,{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',maxAge:86400000});return res.json({ok:true,user:ADMIN_USER})}res.status(401).json({error:'User sau parolă incorecte'})});
 app.get('/api/auth/me',auth,(req,res)=>res.json({user:req.user.sub}));
@@ -35,7 +47,19 @@ app.delete('/api/admin/projects/:id',auth,async(req,res)=>{const {data,error}=aw
 app.post('/api/admin/projects/:id/duplicate',auth,async(req,res)=>{try{const {data:p,error}=await sb.from('projects').select('*').eq('id',req.params.id).single();if(error)throw error;delete p.id;delete p.created_at;delete p.updated_at;p.name+=' copie';p.slug=p.slug+'-copie-'+Date.now().toString().slice(-5);p.is_published=false;const {data:np,error:pe}=await sb.from('projects').insert(p).select().single();if(pe)throw pe;const original=await treeByProject({...p,id:req.params.id});for(const ob of original.buildings){const b={...ob,project_id:np.id};delete b.id;delete b.created_at;delete b.updated_at;delete b.floors;const {data:nb,error:be}=await sb.from('buildings').insert(b).select().single();if(be)throw be;for(const ofl of ob.floors){const fl={...ofl,building_id:nb.id};delete fl.id;delete fl.created_at;delete fl.updated_at;delete fl.apartments;const {data:nf,error:fe}=await sb.from('floors').insert(fl).select().single();if(fe)throw fe;for(const oa of ofl.apartments){const poly=oa.apartment_polygons?.[0]?.points||[];const a={...oa,floor_id:nf.id};delete a.id;delete a.created_at;delete a.updated_at;delete a.apartment_polygons;const {data:na,error:ae}=await sb.from('apartments').insert(a).select().single();if(ae)throw ae;if(poly.length)await sb.from('apartment_polygons').insert({apartment_id:na.id,points:poly})}}}res.json(np)}catch(e){send(res,null,e)}});
 const buildingAllowed=['project_id','name','sort_order','floors_count','default_floor_height_m','ground_floor_different','ground_floor_height_m','model_node_name','model_path','real_height_m','display_height_units','model_up_axis','auto_ground','position_x','position_y','position_z','rotation_y_deg','settings'];
 app.post('/api/admin/buildings',auth,async(req,res)=>{const {data,error}=await sb.from('buildings').insert(clean(req.body,buildingAllowed)).select().single();send(res,data,error)});
-app.patch('/api/admin/buildings/:id',auth,async(req,res)=>{const {data,error}=await sb.from('buildings').update(clean(req.body,buildingAllowed)).eq('id',req.params.id).select().single();send(res,data,error)});
+app.patch('/api/admin/buildings/:id',auth,async(req,res)=>{
+  try{
+    const body=clean(req.body,buildingAllowed);
+    const {data:current,error:ce}=await sb.from('buildings').select('*').eq('id',req.params.id).single();
+    if(ce)throw ce;
+    if(body.settings)body.settings={...(current.settings||{}),...body.settings};
+    if(Object.prototype.hasOwnProperty.call(body,'name')&&body.name!==current.name){
+      body.settings=withDeepLinkAlias(body.settings||current.settings,current.name,body.name);
+    }
+    const {data,error}=await sb.from('buildings').update(body).eq('id',req.params.id).select().single();
+    send(res,data,error);
+  }catch(e){send(res,null,e)}
+});
 app.delete('/api/admin/buildings/:id',auth,async(req,res)=>{const {data,error}=await sb.from('buildings').delete().eq('id',req.params.id).select();send(res,data,error)});
 app.post('/api/admin/buildings/:id/generate-floors',auth,async(req,res)=>{try{const count=Math.max(1,Math.min(100,Number(req.body.count)||1)),standard=Number(req.body.standard)||3,gd=!!req.body.groundDifferent,ground=gd?(Number(req.body.ground)||standard):standard;await sb.from('floors').delete().eq('building_id',req.params.id);let from=0;const rows=[];for(let i=0;i<count;i++){const h=i===0?ground:standard;rows.push({building_id:req.params.id,name:i===0?'Parter':`Etaj ${i}`,floor_number:i,sort_order:i,height_from_m:from,height_to_m:from+h});from+=h}const {data,error}=await sb.from('floors').insert(rows).select();if(error)throw error;await sb.from('buildings').update({floors_count:count,default_floor_height_m:standard,ground_floor_different:gd,ground_floor_height_m:ground,real_height_m:from}).eq('id',req.params.id);res.json(data)}catch(e){send(res,null,e)}});
 
@@ -334,7 +358,19 @@ app.post('/api/admin/buildings/:id/copy-complete-building-layout',auth,async(req
 });
 
 const floorAllowed=['name','floor_number','sort_order','height_from_m','height_to_m','plan_path','model_node_name','plan_width','plan_height','settings'];
-app.patch('/api/admin/floors/:id',auth,async(req,res)=>{const {data,error}=await sb.from('floors').update(clean(req.body,floorAllowed)).eq('id',req.params.id).select().single();send(res,data,error)});
+app.patch('/api/admin/floors/:id',auth,async(req,res)=>{
+  try{
+    const body=clean(req.body,floorAllowed);
+    const {data:current,error:ce}=await sb.from('floors').select('*').eq('id',req.params.id).single();
+    if(ce)throw ce;
+    if(body.settings)body.settings={...(current.settings||{}),...body.settings};
+    if(Object.prototype.hasOwnProperty.call(body,'name')&&body.name!==current.name){
+      body.settings=withDeepLinkAlias(body.settings||current.settings,current.name,body.name);
+    }
+    const {data,error}=await sb.from('floors').update(body).eq('id',req.params.id).select().single();
+    send(res,data,error);
+  }catch(e){send(res,null,e)}
+});
 
 app.post('/api/admin/floors/:id/copy-layout',auth,async(req,res)=>{
   try{
@@ -488,7 +524,21 @@ app.delete('/api/admin/projects/:id/plan-data',auth,async(req,res)=>{
 
 const apartmentAllowed=['floor_id','code','title','status','rooms','usable_area_sqm','total_area_sqm','price','currency','description','model_node_name','image_path','external_url','settings'];
 app.post('/api/admin/apartments',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').insert(clean(req.body,apartmentAllowed)).select().single();send(res,data,error)});
-app.patch('/api/admin/apartments/:id',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').update(clean(req.body,apartmentAllowed)).eq('id',req.params.id).select().single();send(res,data,error)});
+app.patch('/api/admin/apartments/:id',auth,async(req,res)=>{
+  try{
+    const body=clean(req.body,apartmentAllowed);
+    const {data:current,error:ce}=await sb.from('apartments').select('*').eq('id',req.params.id).single();
+    if(ce)throw ce;
+    if(body.settings)body.settings={...(current.settings||{}),...body.settings};
+    const oldIdentity=current.code||current.title||'';
+    const nextIdentity=(Object.prototype.hasOwnProperty.call(body,'code')?body.code:current.code)||(Object.prototype.hasOwnProperty.call(body,'title')?body.title:current.title)||'';
+    if(deepSlug(oldIdentity)!==deepSlug(nextIdentity)){
+      body.settings=withDeepLinkAlias(body.settings||current.settings,oldIdentity,nextIdentity);
+    }
+    const {data,error}=await sb.from('apartments').update(body).eq('id',req.params.id).select().single();
+    send(res,data,error);
+  }catch(e){send(res,null,e)}
+});
 app.delete('/api/admin/apartments/:id',auth,async(req,res)=>{const {data,error}=await sb.from('apartments').delete().eq('id',req.params.id).select();send(res,data,error)});
 app.put('/api/admin/apartments/:id/polygon',auth,async(req,res)=>{const points=(req.body.points||[]).map(p=>({x:Math.max(0,Math.min(1,Number(p.x))),y:Math.max(0,Math.min(1,Number(p.y)))}));const {data,error}=await sb.from('apartment_polygons').upsert({apartment_id:req.params.id,points},{onConflict:'apartment_id'}).select().single();send(res,data,error)});
 app.delete('/api/admin/apartments/:id/polygon',auth,async(req,res)=>{const {data,error}=await sb.from('apartment_polygons').delete().eq('apartment_id',req.params.id).select();send(res,{ok:!error,deleted:data||[]},error)});

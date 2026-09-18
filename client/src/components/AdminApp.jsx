@@ -6,7 +6,7 @@ const PlanEditor=lazy(()=>import('./PlanEditor'));
 const AutoApartmentDetector=lazy(()=>import('./AutoApartmentDetector'));
 const SharedModelMapper=lazy(()=>import('./SharedModelMapper'));
 
-const STEPS=[['general','General'],['buildings','Blocuri'],['model','Model 3D'],['calibration','Calibrare'],['floors','Etaje'],['plans','Planuri & apartamente'],['preview','Preview'],['embed','Embed'],['dashboard','Dashboard']];
+const STEPS=[['general','General'],['buildings','Blocuri'],['model','Model 3D'],['calibration','Calibrare'],['floors','Etaje'],['plans','Planuri & apartamente'],['preview','Preview'],['embed','Embed'],['dashboard','Dashboard'],['links','Linkuri publice']];
 const STEP_ICONS={
   general:'fa-sliders',
   buildings:'fa-building',
@@ -16,8 +16,40 @@ const STEP_ICONS={
   plans:'fa-draw-polygon',
   preview:'fa-eye',
   embed:'fa-code',
-  dashboard:'fa-chart-pie'
+  dashboard:'fa-chart-pie',
+  links:'fa-link'
 };
+
+
+function publicPageBase(project){
+  const raw=String(project?.settings?.public_page_url||'').trim();
+  if(!raw)return '';
+  try{
+    const u=new URL(raw);
+    u.hash='';
+    return u.toString();
+  }catch{return ''}
+}
+function publicEntitySlug(entity,type){
+  if(type==='apartment')return slugify(entity?.code||entity?.title||'');
+  return slugify(entity?.name||'');
+}
+function publicDeepLink(project,{building=null,floor=null,apartment=null}={}){
+  const base=publicPageBase(project);
+  if(!base)return '';
+  const u=new URL(base);
+  if(building)u.searchParams.set('building',publicEntitySlug(building,'building'));
+  else u.searchParams.delete('building');
+  if(floor)u.searchParams.set('floor',publicEntitySlug(floor,'floor'));
+  else u.searchParams.delete('floor');
+  if(apartment)u.searchParams.set('apartment',publicEntitySlug(apartment,'apartment'));
+  else u.searchParams.delete('apartment');
+  return u.toString();
+}
+async function copyPublicLink(value){
+  if(!value)return;
+  await navigator.clipboard.writeText(value);
+}
 
 function siteConfirm({
   title='Confirmare',
@@ -132,10 +164,71 @@ function siteTypedConfirm({
 function Login({onLogin}){const [username,setUsername]=useState('alexdarie'),[password,setPassword]=useState(''),[err,setErr]=useState('');const submit=async e=>{e.preventDefault();setErr('');try{await api('/auth/login',{method:'POST',body:{username,password}});onLogin()}catch(e){setErr(e.message)}};return <div className="login-page"><form onSubmit={submit} className="login-card"><div className="logo-mark">ES</div><h1>Estate Studio</h1><p>Platformă de configurare pentru experiențe imobiliare 3D.</p><label>Utilizator<input value={username} onChange={e=>setUsername(e.target.value)}/></label><label>Parolă<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button className="primary big">Autentificare</button>{err&&<div className="error-box">{err}</div>}</form></div>}
 function Shell({children}){const nav=useNavigate();return <div className="app-shell"><aside className="main-sidebar"><Link className="brand" to="/admin/projects"><span>ES</span><div><b>Estate Studio</b><small>Real Estate Experience</small></div></Link><nav><Link className="main-nav-link" to="/admin/projects"><span className="main-nav-icon">▦</span><span>Proiecte</span></Link></nav><div className="sidebar-foot"><button onClick={async()=>{await api('/auth/logout',{method:'POST'});location.reload()}}>↗ Ieșire</button></div></aside><div className="shell-main">{children}</div></div>}
 function Projects(){const [items,setItems]=useState([]),[show,setShow]=useState(false),[name,setName]=useState(''),[slug,setSlug]=useState(''),[loadError,setLoadError]=useState('');const nav=useNavigate();const load=()=>{setLoadError('');return api('/admin/projects').then(setItems).catch(e=>{setLoadError(e.message);setItems([])})};useEffect(()=>{load()},[]);async function create(e){e.preventDefault();const p=await api('/admin/projects',{method:'POST',body:{name,slug:slug||slugify(name)}});nav(`/admin/projects/${p.id}/general`)}return <Shell><header className="topbar"><div><small>ESTATE STUDIO</small><h1>Proiecte</h1><p>Fiecare proiect are date, modele, planuri și iframe propriu.</p></div><button className="primary" onClick={()=>setShow(true)}>＋ Proiect nou</button></header><div className="content">{loadError&&<div className="error-box" style={{marginBottom:16}}>{loadError}</div>}<div className="project-grid">{items.map(p=><article className="project-card" key={p.id}><div className="project-cover" style={p.settings?.hero_url?{backgroundImage:`linear-gradient(#1d3a3033,#1d3a3033),url(${p.settings.hero_url})`,backgroundSize:'cover',backgroundPosition:'center'}:{}}><span>{p.settings?.hero_url?'':p.name.slice(0,2).toUpperCase()}</span><i className={p.is_published?'live':'draft'}>{p.is_published?'Publicat':'Draft'}</i></div><div className="project-body"><small>/{p.slug}</small><h3>{p.name}</h3><p>{p.building_count||0} blocuri · {p.floor_count||0} etaje · {p.apartment_count||0} apartamente</p><div className="card-actions"><button className="primary" onClick={()=>nav(`/admin/projects/${p.id}/general`)}>Deschide</button><button onClick={async()=>{if(await siteConfirm({title:'Duplică proiectul',message:`Va fi creată o copie nouă pentru ${p.name}.`,confirmLabel:'Duplică'})){await api(`/admin/projects/${p.id}/duplicate`,{method:'POST'});load()}}}>Duplică</button><button className="danger-ghost" onClick={async()=>{if(await siteConfirm({title:'Șterge proiectul',message:`${p.name} va fi șters definitiv, împreună cu datele lui.`,confirmLabel:'Șterge definitiv',danger:true})){await api(`/admin/projects/${p.id}`,{method:'DELETE'});load()}}}>Șterge</button></div></div></article>)}{items.length===0&&<div className="empty-state"><b>Niciun proiect încă</b><span>Creează primul proiect și configurează-i modelul 3D.</span><button className="primary" onClick={()=>setShow(true)}>Creează proiect</button></div>}</div></div>{show&&<div className="modal"><form className="modal-card" onSubmit={create}><button type="button" className="x" onClick={()=>setShow(false)}>×</button><h2>Proiect nou</h2><label>Nume proiect<input autoFocus value={name} onChange={e=>{setName(e.target.value);setSlug(slugify(e.target.value))}} required/></label><label>Slug iframe<input value={slug} onChange={e=>setSlug(slugify(e.target.value))} required/></label><button className="primary big">Creează proiectul</button></form></div>}</Shell>}
-function ProjectShell({project,reload,children}){const {section}=useParams();const idx=Math.max(0,STEPS.findIndex(([k])=>k===section));const complete={general:!!project.name,buildings:(project.buildings||[]).length>0,model:!!project.settings?.shared_model?.url||(project.buildings||[]).some(b=>b.model_path),calibration:project.settings?.model_mode==='shared'?!!project.settings?.shared_model?.display_height_units:(project.buildings||[]).some(b=>b.model_path&&b.real_height_m&&b.display_height_units),floors:(project.buildings||[]).some(b=>(b.floors||[]).length>0),plans:(project.buildings||[]).some(b=>(b.floors||[]).some(f=>f.plan_path&&(f.apartments||[]).length>0)),preview:false,embed:project.is_published,dashboard:true};return <Shell><header className="project-top"><div><Link to="/admin/projects">← Proiecte</Link><small>{project.is_published?'PUBLICAT':'DRAFT'}</small><h1>{project.name}</h1><span>/{project.slug}</span></div><div className="project-top-actions"><a href={`/embed/${project.slug}?preview=1`} target="_blank" rel="noreferrer">Deschide viewer ↗</a><button className={project.is_published?'success':'primary'} onClick={async()=>{await api(`/admin/projects/${project.id}`,{method:'PATCH',body:{is_published:!project.is_published}});reload()}}>{project.is_published?'✓ Publicat':'Publică proiectul'}</button></div></header><div className="project-layout"><aside className="project-nav">{STEPS.map(([key,label])=><Link key={key} className={`${section===key?'active':''}${complete[key]?' complete':''}`} to={`/admin/projects/${project.id}/${key}`}><span className="project-nav-icon"><i className={`fa-solid ${STEP_ICONS[key]}`}/></span>{label}</Link>)}</aside><main className="project-content">{children}<div className="step-footer">{idx>0?<Link className="button-link" to={`/admin/projects/${project.id}/${STEPS[idx-1][0]}`}>← {STEPS[idx-1][1]}</Link>:<span/>}{idx<STEPS.length-1&&<Link className="primary" to={`/admin/projects/${project.id}/${STEPS[idx+1][0]}`}>{STEPS[idx+1][1]} →</Link>}</div></main></div></Shell>}
+function ProjectShell({project,reload,children}){const {section}=useParams();const idx=Math.max(0,STEPS.findIndex(([k])=>k===section));const complete={general:!!project.name,buildings:(project.buildings||[]).length>0,model:!!project.settings?.shared_model?.url||(project.buildings||[]).some(b=>b.model_path),calibration:project.settings?.model_mode==='shared'?!!project.settings?.shared_model?.display_height_units:(project.buildings||[]).some(b=>b.model_path&&b.real_height_m&&b.display_height_units),floors:(project.buildings||[]).some(b=>(b.floors||[]).length>0),plans:(project.buildings||[]).some(b=>(b.floors||[]).some(f=>f.plan_path&&(f.apartments||[]).length>0)),preview:false,embed:project.is_published,dashboard:true,links:!!project.settings?.public_page_url};return <Shell><header className="project-top"><div><Link to="/admin/projects">← Proiecte</Link><small>{project.is_published?'PUBLICAT':'DRAFT'}</small><h1>{project.name}</h1><span>/{project.slug}</span></div><div className="project-top-actions"><a href={`/embed/${project.slug}?preview=1`} target="_blank" rel="noreferrer">Deschide viewer ↗</a><button className={project.is_published?'success':'primary'} onClick={async()=>{await api(`/admin/projects/${project.id}`,{method:'PATCH',body:{is_published:!project.is_published}});reload()}}>{project.is_published?'✓ Publicat':'Publică proiectul'}</button></div></header><div className="project-layout"><aside className="project-nav">{STEPS.map(([key,label])=><Link key={key} className={`${section===key?'active':''}${complete[key]?' complete':''}`} to={`/admin/projects/${project.id}/${key}`}><span className="project-nav-icon"><i className={`fa-solid ${STEP_ICONS[key]}`}/></span>{label}</Link>)}</aside><main className="project-content">{children}<div className="step-footer">{idx>0?<Link className="button-link" to={`/admin/projects/${project.id}/${STEPS[idx-1][0]}`}>← {STEPS[idx-1][1]}</Link>:<span/>}{idx<STEPS.length-1&&<Link className="primary" to={`/admin/projects/${project.id}/${STEPS[idx+1][0]}`}>{STEPS[idx+1][1]} →</Link>}</div></main></div></Shell>}
 function SectionHead({kicker,title,desc,actions}){return <div className="section-head"><div><small>{kicker}</small><h2>{title}</h2><p>{desc}</p></div>{actions&&<div>{actions}</div>}</div>}
-function General({p,reload}){const [form,setForm]=useState({name:p.name,slug:p.slug,description:p.description||'',embed_height:p.embed_height||760,source_mode:p.source_mode||'glb'});const save=async()=>{await api(`/admin/projects/${p.id}`,{method:'PATCH',body:form});reload()};async function uploadBrand(file,key){const fd=new FormData();fd.append('file',file);fd.append('project_id',p.id);fd.append('asset_type',key==='logo_url'?'project-logo':'project-hero');const u=await api('/admin/upload/project-images',{method:'POST',body:fd});await api(`/admin/projects/${p.id}`,{method:'PATCH',body:{settings:{...(p.settings||{}),[key]:u.url}}});reload()}return <><SectionHead kicker="01 · GENERAL" title="Identitatea proiectului" desc="Datele de bază și modul în care va fi folosit proiectul."/><div className="panel form-grid"><label>Nume proiect<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Slug public<input value={form.slug} onChange={e=>setForm({...form,slug:slugify(e.target.value)})}/></label><label className="wide">Descriere<textarea rows="4" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Înălțime iframe implicită<input type="number" value={form.embed_height} onChange={e=>setForm({...form,embed_height:+e.target.value})}/></label><label>Sursă model<select value={form.source_mode} onChange={e=>setForm({...form,source_mode:e.target.value})}><option value="glb">GLB / GLTF existent</option><option value="documents">Documentație arhitecturală</option></select></label><div className="wide end"><button className="primary" onClick={save}>Salvează</button></div></div><div className="panel brand-assets"><div><h3>Logo proiect</h3>{p.settings?.logo_url?<img className="asset-preview logo" src={p.settings.logo_url}/>:<div className="asset-placeholder">LOGO</div>}<label className="button-file"><input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadBrand(e.target.files[0],'logo_url')}/>Încarcă logo</label></div><div><h3>Imagine proiect</h3>{p.settings?.hero_url?<img className="asset-preview" src={p.settings.hero_url}/>:<div className="asset-placeholder">HERO</div>}<label className="button-file"><input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadBrand(e.target.files[0],'hero_url')}/>Încarcă imagine</label></div></div>{form.source_mode==='documents'&&<Documents p={p} reload={reload}/>}</>}
-function Documents({p,reload}){const [busy,setBusy]=useState(false);async function up(file){setBusy(true);try{const fd=new FormData();fd.append('file',file);fd.append('project_id',p.id);fd.append('asset_type','architectural-document');await api('/admin/upload/project-documents',{method:'POST',body:fd});reload()}finally{setBusy(false)}}return <div className="panel"><h3>Documentație arhitecturală</h3><p className="hint">Încarcă plan general, planuri de nivel, fațade, secțiuni și cote. Fișierele sunt păstrate pe proiect pentru fluxul de modelare.</p><label className="upload-zone"><input type="file" multiple accept=".pdf,image/*,.dwg,.dxf" onChange={e=>[...e.target.files].forEach(up)}/><b>{busy?'Se încarcă…':'＋ Încarcă documentație'}</b><span>PDF, imagini, DWG/DXF · max 50 MB / fișier</span></label><div className="asset-list">{(p.assets||[]).filter(a=>a.asset_type==='architectural-document').map(a=><div key={a.id}><b>{a.file_name||a.label||'Document'}</b><span>{a.mime_type||''}</span></div>)}</div><div className="notice warning">Generarea automată a unui model comercial detaliat din planuri necesită un motor de modelare/AI conectat serverului. Estate Studio păstrează documentația și workflow-ul pregătit, fără să inventeze geometrie lipsă.</div></div>}
+function General({p,reload}){
+  const [form,setForm]=useState({
+    name:p.name,
+    slug:p.slug,
+    description:p.description||'',
+    embed_height:p.embed_height||760,
+    source_mode:p.source_mode||'glb',
+    public_page_url:p.settings?.public_page_url||''
+  });
+
+  const save=async()=>{
+    const {public_page_url,...projectFields}=form;
+    await api(`/admin/projects/${p.id}`,{
+      method:'PATCH',
+      body:{
+        ...projectFields,
+        settings:{...(p.settings||{}),public_page_url:String(public_page_url||'').trim()}
+      }
+    });
+    reload();
+  };
+
+  async function uploadBrand(file,key){
+    const fd=new FormData();
+    fd.append('file',file);
+    fd.append('project_id',p.id);
+    fd.append('asset_type',key==='logo_url'?'project-logo':'project-hero');
+    const u=await api('/admin/upload/project-images',{method:'POST',body:fd});
+    await api(`/admin/projects/${p.id}`,{method:'PATCH',body:{settings:{...(p.settings||{}),[key]:u.url}}});
+    reload();
+  }
+
+  return <>
+    <SectionHead kicker="01 · GENERAL" title="Identitatea proiectului" desc="Datele de bază și modul în care va fi folosit proiectul."/>
+    <div className="panel form-grid">
+      <label>Nume proiect<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label>
+      <label>Slug public<input value={form.slug} onChange={e=>setForm({...form,slug:slugify(e.target.value)})}/></label>
+      <label className="wide">Descriere<textarea rows="4" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
+      <label>Înălțime iframe implicită<input type="number" value={form.embed_height} onChange={e=>setForm({...form,embed_height:+e.target.value})}/></label>
+      <label>Sursă model<select value={form.source_mode} onChange={e=>setForm({...form,source_mode:e.target.value})}><option value="glb">GLB / GLTF existent</option><option value="documents">Documentație arhitecturală</option></select></label>
+
+      <label className="wide public-page-url-field">
+        URL public al paginii cu embed
+        <input
+          type="url"
+          placeholder="https://client.ro/apartamente"
+          value={form.public_page_url}
+          onChange={e=>setForm({...form,public_page_url:e.target.value})}
+        />
+        <small>Acesta este linkul pe care îl vede și îl distribuie clientul. Estate Studio va genera automat linkurile către blocuri, etaje și apartamente.</small>
+      </label>
+
+      <div className="wide end"><button className="primary" onClick={save}>Salvează</button></div>
+    </div>
+
+    <div className="panel brand-assets">
+      <div><h3>Logo proiect</h3>{p.settings?.logo_url?<img className="asset-preview logo" src={p.settings.logo_url}/>:<div className="asset-placeholder">LOGO</div>}<label className="button-file"><input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadBrand(e.target.files[0],'logo_url')}/>Încarcă logo</label></div>
+      <div><h3>Imagine proiect</h3>{p.settings?.hero_url?<img className="asset-preview" src={p.settings.hero_url}/>:<div className="asset-placeholder">HERO</div>}<label className="button-file"><input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadBrand(e.target.files[0],'hero_url')}/>Încarcă imagine</label></div>
+    </div>
+    {form.source_mode==='documents'&&<Documents p={p} reload={reload}/>}
+  </>
+}
+
 function Buildings({p,reload}){
   const [name,setName]=useState('');
   const shared=p.settings?.model_mode==='shared';
@@ -149,6 +242,7 @@ function Buildings({p,reload}){
         {shared
           ? <><label>Offset bază Y<input type="number" step=".1" defaultValue={b.position_y||0} onBlur={e=>api(`/admin/buildings/${b.id}`,{method:'PATCH',body:{position_y:+e.target.value}}).then(reload)}/></label><div className="mapping-state">{b.settings?.shared_mapping?.node_names?.length||b.settings?.shared_mapping?.footprint?<b>✓ mapat</b>:<span>nemapat</span>}</div></>
           : <><label>Poziție X<input type="number" step=".1" defaultValue={b.position_x||0} onBlur={e=>api(`/admin/buildings/${b.id}`,{method:'PATCH',body:{position_x:+e.target.value}}).then(reload)}/></label><label>Poziție Z<input type="number" step=".1" defaultValue={b.position_z||0} onBlur={e=>api(`/admin/buildings/${b.id}`,{method:'PATCH',body:{position_z:+e.target.value}}).then(reload)}/></label><label>Rotație Y°<input type="number" defaultValue={b.rotation_y_deg||0} onBlur={e=>api(`/admin/buildings/${b.id}`,{method:'PATCH',body:{rotation_y_deg:+e.target.value}}).then(reload)}/></label></>}
+        {publicPageBase(p)&&<button className="ui-action copy-link-button" title={publicDeepLink(p,{building:b})} onClick={()=>copyPublicLink(publicDeepLink(p,{building:b}))}><i className="fa-solid fa-link"/> Copiază link</button>}
         <button className="danger-ghost" onClick={async()=>{if(await siteConfirm({title:'Șterge blocul',message:'Blocul, etajele și apartamentele lui vor fi șterse definitiv.',confirmLabel:'Șterge blocul',danger:true})){await api(`/admin/buildings/${b.id}`,{method:'DELETE'});reload()}}}>Șterge</button>
       </div>)}
       <div className="panel add-row"><input placeholder="Ex. Bloc 2" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&add()}/><button className="primary" onClick={add}>＋ Adaugă bloc</button></div>
@@ -457,13 +551,14 @@ function Floors({p,reload}){
         <button className="primary big" onClick={generate}>Generează etajele</button>
       </div>
       <div className="panel">
-        <div className="table">
-          <div className="tr th"><span>Nivel</span><span>De la (m)</span><span>Până la (m)</span><span>Plan</span></div>
+        <div className="table floor-links-table">
+          <div className="tr th"><span>Nivel</span><span>De la (m)</span><span>Până la (m)</span><span>Plan</span><span>Link</span></div>
           {(b.floors||[]).map(f=><div className="tr" key={f.id}>
             <input defaultValue={f.name} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{name:e.target.value}}).then(reload)}/>
             <input type="number" step=".1" defaultValue={f.height_from_m} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{height_from_m:+e.target.value}}).then(reload)}/>
             <input type="number" step=".1" defaultValue={f.height_to_m} onBlur={e=>api(`/admin/floors/${f.id}`,{method:'PATCH',body:{height_to_m:+e.target.value}}).then(reload)}/>
             <span>{f.plan_path?'✓':'—'}</span>
+            <span>{publicPageBase(p)?<button className="ui-action mini-link-button" title={publicDeepLink(p,{building:b,floor:f})} onClick={()=>copyPublicLink(publicDeepLink(p,{building:b,floor:f}))}><i className="fa-solid fa-link"/> Copiază</button>:'—'}</span>
           </div>)}
         </div>
         {(b.floors||[]).length===0&&<div className="empty-mini">Generează structura de etaje.</div>}
@@ -554,13 +649,14 @@ function Plans({p,reload}){
 
       <div className="panel apartment-table">
         <div className="table">
-          <div className="tr th"><span>Cod</span><span>Status</span><span>Camere</span><span>Suprafață</span><span></span></div>
+          <div className="tr th"><span>Cod</span><span>Status</span><span>Camere</span><span>Suprafață</span><span>Acțiuni</span></div>
           {(f.apartments||[]).map(a=><div className="tr" key={a.id}>
             <b>{a.code}</b>
             <span className={'status-pill '+a.status}>{statusLabel[a.status]}</span>
             <span>{a.rooms||'—'}</span>
             <span>{a.usable_area_sqm?`${a.usable_area_sqm} m²`:'—'}</span>
             <div className="row-actions">
+              {publicPageBase(p)&&<button className="copy-link-button" title={publicDeepLink(p,{building:b,floor:f,apartment:a})} onClick={()=>copyPublicLink(publicDeepLink(p,{building:b,floor:f,apartment:a}))}><i className="fa-solid fa-link"/> Link</button>}
               <button onClick={()=>setEdit(a)}>Editează</button>
               <button className="danger-ghost" onClick={async()=>{if(await siteConfirm({title:'Șterge apartamentul',message:`Apartamentul ${a.code} și maparea lui vor fi șterse.`,confirmLabel:'Șterge',danger:true})){await api(`/admin/apartments/${a.id}`,{method:'DELETE'});reload()}}}>Șterge</button>
             </div>
@@ -578,7 +674,51 @@ function Plans({p,reload}){
 }
 
 function Preview({p}){return <><SectionHead kicker="06 · PREVIEW" title="Exact ce va vedea clientul" desc="Viewerul de mai jos este aceeași rută folosită în iframe."/><div className="panel iframe-preview"><iframe src={`/embed/${p.slug}?preview=1`} title="Preview"/></div></>}
-function Embed({p,reload}){const origin=window.location.origin;const code=`<iframe\n  src="${origin}/embed/${p.slug}"\n  width="100%"\n  height="${p.embed_height||760}"\n  style="border:0"\n  allowfullscreen\n  loading="lazy"\n></iframe>`;return <><SectionHead kicker="07 · EMBED" title="Integrare în site" desc="Copiază codul și inserează-l în pagina clientului."/><div className="embed-admin-grid"><div className="panel"><h3>Cod iframe</h3><pre className="codebox">{code}</pre><button className="primary" onClick={()=>navigator.clipboard.writeText(code)}>Copiază codul</button></div><div className="panel"><h3>Setări</h3><label>Înălțime iframe (px)<input type="number" defaultValue={p.embed_height||760} onBlur={async e=>{await api(`/admin/projects/${p.id}`,{method:'PATCH',body:{embed_height:+e.target.value}});reload()}}/></label><label>URL direct<input readOnly value={`${origin}/embed/${p.slug}`}/></label><a className="button-link" href={`/embed/${p.slug}`} target="_blank" rel="noreferrer">Deschide viewerul ↗</a></div></div></>}
+function Embed({p,reload}){
+  const origin=window.location.origin;
+  const mountId=`estate-studio-${slugify(p.slug||p.name)}`;
+  const smartCode=`<div id="${mountId}"></div>
+<script>
+(function(){
+  var mount=document.getElementById('${mountId}');
+  var viewer=new URL('${origin}/embed/${p.slug}');
+  var pageParams=new URLSearchParams(window.location.search);
+
+  ['building','floor','apartment'].forEach(function(key){
+    var value=pageParams.get(key);
+    if(value)viewer.searchParams.set(key,value);
+  });
+
+  var iframe=document.createElement('iframe');
+  iframe.src=viewer.toString();
+  iframe.width='100%';
+  iframe.height='${p.embed_height||760}';
+  iframe.style.border='0';
+  iframe.loading='lazy';
+  iframe.setAttribute('allowfullscreen','');
+  mount.appendChild(iframe);
+})();
+<\/script>`;
+
+  return <>
+    <SectionHead kicker="07 · EMBED" title="Integrare în site" desc="Copiază codul inteligent. El transmite viewerului doar parametrii building / floor / apartment din URL-ul paginii clientului."/>
+    <div className="embed-admin-grid">
+      <div className="panel">
+        <h3>Cod embed inteligent</h3>
+        <pre className="codebox">{smartCode}</pre>
+        <button className="primary" onClick={()=>navigator.clipboard.writeText(smartCode)}>Copiază codul</button>
+        <div className="notice embed-deeplink-notice">UTM-urile și ceilalți parametri ai paginii clientului nu sunt modificați și nu sunt trimiși automat către Estate Studio.</div>
+      </div>
+      <div className="panel">
+        <h3>Setări</h3>
+        <label>Înălțime iframe (px)<input type="number" defaultValue={p.embed_height||760} onBlur={async e=>{await api(`/admin/projects/${p.id}`,{method:'PATCH',body:{embed_height:+e.target.value}});reload()}}/></label>
+        <label>URL intern viewer<input readOnly value={`${origin}/embed/${p.slug}`}/></label>
+        <label>URL public client<input readOnly value={publicPageBase(p)||'Configurează în General'}/></label>
+        <a className="button-link" href={`/embed/${p.slug}`} target="_blank" rel="noreferrer">Deschide viewerul ↗</a>
+      </div>
+    </div>
+  </>
+}
 
 function Dashboard({p}){
   const apartments=(p.buildings||[]).flatMap(b=>(b.floors||[]).flatMap(f=>(f.apartments||[]).map(a=>({...a,_building:b,_floor:f}))));
@@ -746,5 +886,84 @@ function Dashboard({p}){
   </>
 }
 
-function Project(){const {id,section='general'}=useParams();const [p,setP]=useState(null),[err,setErr]=useState('');const load=()=>api(`/admin/projects/${id}`).then(data=>{setP(data);setErr('');return data}).catch(e=>{setErr(e.message);throw e});useEffect(()=>{let active=true;setP(null);setErr('');api(`/admin/projects/${id}`).then(data=>{if(active)setP(data)}).catch(e=>{if(active)setErr(e.message)});return()=>{active=false}},[id]);if(err)return <Shell><div className="content"><div className="error-box">{err}</div></div></Shell>;if(!p)return <div className="page-loading">Se încarcă proiectul…</div>;let comp={general:<General p={p} reload={load}/>,buildings:<Buildings p={p} reload={load}/>,model:<Model p={p} reload={load}/>,calibration:<Calibration p={p} reload={load}/>,floors:<Floors p={p} reload={load}/>,plans:<Plans p={p} reload={load}/>,preview:<Preview p={p}/>,embed:<Embed p={p} reload={load}/>,dashboard:<Dashboard p={p}/>}[section]||<General p={p} reload={load}/>;return <ProjectShell project={p} reload={load}>{comp}</ProjectShell>}
+
+function PublicLinks({p}){
+  const base=publicPageBase(p);
+  const totalLinks=(p.buildings||[]).reduce((sum,b)=>sum+1+(b.floors||[]).reduce((s,f)=>s+1+(f.apartments||[]).length,0),0);
+
+  if(!base)return <>
+    <SectionHead kicker="09 · LINKURI PUBLICE" title="Deep links pentru campanii" desc="Linkurile sunt generate pe domeniul clientului, nu pe Estate Studio."/>
+    <div className="empty-state public-links-empty">
+      <i className="fa-solid fa-link"/>
+      <b>Configurează URL-ul public</b>
+      <span>În pagina General completează câmpul „URL public al paginii cu embed”, de exemplu https://client.ro/apartamente.</span>
+      <Link className="primary" to={`/admin/projects/${p.id}/general`}>Mergi la General</Link>
+    </div>
+  </>;
+
+  return <>
+    <SectionHead
+      kicker="09 · LINKURI PUBLICE"
+      title="Deep links pentru proiect"
+      desc="Linkuri gata de folosit către ansamblu, blocuri, etaje și apartamente. Slug-urile sunt generate automat din denumirile introduse în admin."
+      actions={<button className="ui-action" onClick={()=>copyPublicLink(base)}><i className="fa-solid fa-copy"/> Copiază link ansamblu</button>}
+    />
+
+    <div className="panel public-link-summary">
+      <div><small>PAGINĂ PUBLICĂ</small><b>{base}</b></div>
+      <div><small>LINKURI GENERATE</small><b>{totalLinks}</b></div>
+      <div><small>ALIASURI</small><b>automate la redenumire</b></div>
+    </div>
+
+    <div className="public-links-tree">
+      {(p.buildings||[]).map(b=>{
+        const buildingLink=publicDeepLink(p,{building:b});
+        return <section className="panel public-link-building" key={b.id}>
+          <div className="public-link-building-head">
+            <div>
+              <small>BLOC · {publicEntitySlug(b,'building')}</small>
+              <h3>{b.name}</h3>
+            </div>
+            <div className="public-link-actions">
+              <code>{buildingLink}</code>
+              <button className="ui-action" onClick={()=>copyPublicLink(buildingLink)}><i className="fa-solid fa-copy"/> Copiază</button>
+            </div>
+          </div>
+
+          <div className="public-link-floor-list">
+            {(b.floors||[]).map(f=>{
+              const floorLink=publicDeepLink(p,{building:b,floor:f});
+              return <div className="public-link-floor" key={f.id}>
+                <div className="public-link-floor-head">
+                  <div><i className="fa-solid fa-layer-group"/><span>{f.name}</span><small>{publicEntitySlug(f,'floor')}</small></div>
+                  <div className="public-link-actions">
+                    <code>{floorLink}</code>
+                    <button className="mini-link-button" onClick={()=>copyPublicLink(floorLink)}><i className="fa-solid fa-copy"/> Copiază</button>
+                  </div>
+                </div>
+
+                {(f.apartments||[]).length>0&&<div className="public-link-apartments">
+                  {(f.apartments||[]).map(a=>{
+                    const apartmentLink=publicDeepLink(p,{building:b,floor:f,apartment:a});
+                    return <div className="public-link-apartment" key={a.id}>
+                      <div><b>{a.code}</b><span>{a.title||'Apartament'}</span><small>{publicEntitySlug(a,'apartment')}</small></div>
+                      <code>{apartmentLink}</code>
+                      <button className="mini-link-button" onClick={()=>copyPublicLink(apartmentLink)}><i className="fa-solid fa-copy"/> Copiază</button>
+                    </div>
+                  })}
+                </div>}
+              </div>
+            })}
+          </div>
+        </section>
+      })}
+    </div>
+
+    <div className="notice public-links-note">
+      Dacă redenumești un bloc, etaj sau cod de apartament, Estate Studio păstrează automat slug-ul vechi ca alias. Linkurile deja folosite în campanii continuă astfel să funcționeze.
+    </div>
+  </>
+}
+
+function Project(){const {id,section='general'}=useParams();const [p,setP]=useState(null),[err,setErr]=useState('');const load=()=>api(`/admin/projects/${id}`).then(data=>{setP(data);setErr('');return data}).catch(e=>{setErr(e.message);throw e});useEffect(()=>{let active=true;setP(null);setErr('');api(`/admin/projects/${id}`).then(data=>{if(active)setP(data)}).catch(e=>{if(active)setErr(e.message)});return()=>{active=false}},[id]);if(err)return <Shell><div className="content"><div className="error-box">{err}</div></div></Shell>;if(!p)return <div className="page-loading">Se încarcă proiectul…</div>;let comp={general:<General p={p} reload={load}/>,buildings:<Buildings p={p} reload={load}/>,model:<Model p={p} reload={load}/>,calibration:<Calibration p={p} reload={load}/>,floors:<Floors p={p} reload={load}/>,plans:<Plans p={p} reload={load}/>,preview:<Preview p={p}/>,embed:<Embed p={p} reload={load}/>,dashboard:<Dashboard p={p}/>,links:<PublicLinks p={p}/>}[section]||<General p={p} reload={load}/>;return <ProjectShell project={p} reload={load}>{comp}</ProjectShell>}
 export default function AdminApp(){const [auth,setAuth]=useState(null);useEffect(()=>{api('/auth/me').then(()=>setAuth(true)).catch(()=>setAuth(false))},[]);if(auth===null)return <div className="page-loading">ESTATE STUDIO</div>;if(!auth)return <Login onLogin={()=>setAuth(true)}/>;return <Routes><Route path="/" element={<Navigate to="/admin/projects" replace/>}/><Route path="/admin" element={<Navigate to="/admin/projects" replace/>}/><Route path="/admin/projects" element={<Projects/>}/><Route path="/admin/projects/:id/:section" element={<Project/>}/><Route path="*" element={<Navigate to="/admin/projects" replace/>}/></Routes>}
