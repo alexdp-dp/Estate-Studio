@@ -4623,3 +4623,38 @@ button.ui-action:hover,
   .dashboard-rate-ring::after{width:80px;height:80px}
   .dashboard-rate-ring b{font-size:21px}
 }
+
+
+/* ==========================================================================
+   04.5.6 — STATIC DASHBOARD HERO
+   ========================================================================== */
+
+/* Dashboard 3D is presentation-only: no hover, no controls, no animation cues. */
+.dashboard-3d-frame,
+.dashboard-3d-frame *{
+  cursor:default!important;
+}
+.dashboard-3d-frame .three-viewer.static-view,
+.dashboard-3d-frame .three-viewer.static-view canvas{
+  pointer-events:none!important;
+}
+.dashboard-3d-frame .model-tooltip,
+.dashboard-3d-frame .viewer-presets,
+.dashboard-3d-frame .viewer-tools,
+.dashboard-3d-frame .building-bubble{
+  display:none!important;
+}
+
+/* Static hero gets a subtle framing gradient, not an interactive-canvas look. */
+.dashboard-3d-frame::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  box-shadow:inset 0 0 0 1px rgba(210,223,216,.36);
+  background:linear-gradient(180deg,rgba(255,255,255,.025),rgba(223,238,231,.06));
+}
+
+/* No monthly-growth semantics on this dashboard for now. */
+.dashboard-kpi-card .delta{display:none!important}
+.dashboard-data-note{display:none!important}

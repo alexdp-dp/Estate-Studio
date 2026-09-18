@@ -593,6 +593,8 @@ function Dashboard({p}){
   const studios=apartments.filter(a=>Number(a.rooms)<=1&&Number(a.rooms)>0).length;
   const room2=roomCount(2),room3=roomCount(3);
   const room4=apartments.filter(a=>Number(a.rooms)>=4).length;
+  const roomsKnown=apartments.map(a=>Number(a.rooms||0)).filter(v=>v>0);
+  const avgRooms=roomsKnown.length?(roomsKnown.reduce((s,v)=>s+v,0)/roomsKnown.length).toFixed(1):'—';
 
   const priced=apartments.filter(a=>Number(a.price)>0);
   const avgPrice=priced.length?Math.round(priced.reduce((s,a)=>s+Number(a.price||0),0)/priced.length):0;
@@ -600,13 +602,6 @@ function Dashboard({p}){
   const areaValues=apartments.map(a=>Number(a.usable_area_sqm||a.total_area_sqm||0)).filter(Boolean);
   const avgArea=areaValues.length?Math.round(areaValues.reduce((s,v)=>s+v,0)/areaValues.length):0;
 
-  const now=new Date();
-  const startThis=new Date(now.getFullYear(),now.getMonth(),1);
-  const startPrev=new Date(now.getFullYear(),now.getMonth()-1,1);
-  const addedThis=apartments.filter(a=>a.created_at&&new Date(a.created_at)>=startThis).length;
-  const addedPrev=apartments.filter(a=>a.created_at&&new Date(a.created_at)>=startPrev&&new Date(a.created_at)<startThis).length;
-  const inventoryDelta=addedPrev?Math.round(((addedThis-addedPrev)/addedPrev)*100):(addedThis?100:0);
-  const deltaUp=inventoryDelta>=0;
 
   const buildingStats=(p.buildings||[]).map(b=>{
     const aps=(b.floors||[]).flatMap(f=>f.apartments||[]);
@@ -641,7 +636,7 @@ function Dashboard({p}){
         </div>
         <div className="dashboard-3d-frame">
           <Suspense fallback={<div className="dashboard-3d-loading">Se încarcă modelul 3D…</div>}>
-            <ThreeViewer buildings={p.buildings||[]} sharedModel={sharedModel} compact showGrid={false} showBubbles={false}/>
+            <ThreeViewer buildings={p.buildings||[]} sharedModel={sharedModel} compact staticView showGrid={false} showBubbles={false}/>
           </Suspense>
         </div>
       </div>
@@ -675,9 +670,9 @@ function Dashboard({p}){
         <small>{(p.buildings||[]).length} blocuri · {(p.buildings||[]).reduce((s,b)=>s+(b.floors||[]).length,0)} etaje</small>
       </div>
       <div className="dashboard-kpi-card lilac">
-        <div className="dashboard-kpi-icon"><i className="fa-solid fa-arrow-trend-up"/></div>
-        <span>Inventar nou</span><b>{addedThis}</b>
-        <small className={deltaUp?'delta up':'delta down'}><i className={`fa-solid ${deltaUp?'fa-arrow-up':'fa-arrow-down'}`}/> {Math.abs(inventoryDelta)}% vs luna trecută</small>
+        <div className="dashboard-kpi-icon"><i className="fa-solid fa-door-open"/></div>
+        <span>Număr mediu camere</span><b>{avgRooms}</b>
+        <small>medie calculată pentru unitățile cu tipologie definită</small>
       </div>
       <div className="dashboard-kpi-card blue">
         <div className="dashboard-kpi-icon"><i className="fa-solid fa-ruler-combined"/></div>
@@ -748,7 +743,6 @@ function Dashboard({p}){
       </div>
     </div>
 
-    <p className="dashboard-data-note">Indicatorul lunar compară apartamentele introduse în proiect în luna curentă cu luna precedentă, pe baza datei de creare. Istoricul schimbărilor de status nu este stocat încă.</p>
   </>
 }
 

@@ -357,7 +357,7 @@ function BuildingBubbleLayer({buildings,boundsMap,selectedBuildingId,onSelectBui
   </>;
 }
 
-function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsRef,focusTick=0,cinematic=false}){
+function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsRef,focusTick=0,cinematic=false,staticView=false}){
   const {camera}=useThree();
   const tween=useRef(null);
 
@@ -476,6 +476,20 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
 
     if(!position||!target)return;
 
+    if(staticView){
+      camera.position.copy(position);
+      camera.fov=finalFov;
+      camera.updateProjectionMatrix();
+      camera.lookAt(target);
+      if(controlsRef.current){
+        controlsRef.current.target.copy(target);
+        controlsRef.current.enabled=false;
+        controlsRef.current.update();
+      }
+      tween.current=null;
+      return;
+    }
+
     if(controlsRef.current)controlsRef.current.enabled=false;
 
     tween.current={
@@ -490,7 +504,7 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
     };
   },[
     selectedBuildingId,preset,focusTick,JSON.stringify(boundsMap),
-    camera,controlsRef,cinematic
+    camera,controlsRef,cinematic,staticView
   ]);
 
   useFrame((_,dt)=>{
@@ -528,7 +542,7 @@ function CameraDirector({buildings,boundsMap,selectedBuildingId,preset,controlsR
     }
   });
 
-  useEffect(()=>()=>{if(controlsRef.current)controlsRef.current.enabled=true},[controlsRef]);
+  useEffect(()=>()=>{if(controlsRef.current&&!staticView)controlsRef.current.enabled=true},[controlsRef,staticView]);
 
   return null;
 }
@@ -544,7 +558,8 @@ export default function ThreeViewer({
   sharedModel=null,
   publicMode=false,
   showGrid=true,
-  showBubbles=false
+  showBubbles=false,
+  staticView=false
 }){
   const controls=useRef();
   const [preset,setPreset]=useState('perspective');
@@ -569,25 +584,38 @@ export default function ThreeViewer({
   const individual=buildings.filter(b=>b.model_path);
   const hasShared=!!sharedModel?.url;
 
-  return <div className={'three-viewer '+(compact?'compact ':'')+(publicMode?'public-viewer':'')} style={{cursor:hoverInfo?'pointer':'grab'}}>
+  return <div className={'three-viewer '+(compact?'compact ':'')+(publicMode?'public-viewer':'')+(staticView?' static-view':'')} style={{cursor:staticView?'default':(hoverInfo?'pointer':'grab')}}>
     {!hasShared&&individual.length===0&&<div className="viewer-empty"><b>Niciun model 3D încărcat</b><span>Încarcă un GLB/GLTF din secțiunea Model 3D.</span></div>}
     <Canvas camera={{position:[5,3.8,6],fov:38,near:.01,far:1500}} shadows dpr={[1,1.7]} onPointerMissed={()=>setHoverInfo(null)} onCreated={({gl})=>{gl.outputColorSpace=THREE.SRGBColorSpace}}>
       <color attach="background" args={[publicMode?'#ecefec':'#e9edea']}/>
       <ambientLight intensity={1.48}/><directionalLight castShadow position={[7,11,6]} intensity={2.15}/>
       <Suspense fallback={null}>
         {hasShared
-          ? <SharedComplex url={sharedModel.url} cfg={sharedModel} buildings={buildings} selectedBuildingId={selectedBuildingId} selectedFloor={selectedFloor} hoverInfo={hoverInfo} onHover={setHoverInfo} onLeave={()=>setHoverInfo(null)} onSelectBuilding={onSelectBuilding} onSelectFloor={onSelectFloor} onBounds={setBound}/>
-          : individual.map(b=><IndividualBuilding key={b.id} building={b} selectedBuildingId={selectedBuildingId} selectedFloor={b.id===selectedBuildingId?selectedFloor:null} hoveredFloor={hoverInfo?.building?.id===b.id?hoverInfo.floor:null} hovered={hoverInfo?.building?.id===b.id} onHover={setHoverInfo} onLeave={bb=>setHoverInfo(v=>v?.building?.id===bb.id?null:v)} onSelectBuilding={onSelectBuilding} onSelectFloor={onSelectFloor} dimOthers={!!selectedBuildingId&&b.id!==selectedBuildingId} onBounds={setBound}/>)
+          ? <SharedComplex url={sharedModel.url} cfg={sharedModel} buildings={buildings} selectedBuildingId={selectedBuildingId} selectedFloor={selectedFloor} hoverInfo={staticView?null:hoverInfo} onHover={staticView?undefined:setHoverInfo} onLeave={staticView?undefined:()=>setHoverInfo(null)} onSelectBuilding={staticView?undefined:onSelectBuilding} onSelectFloor={staticView?undefined:onSelectFloor} onBounds={setBound}/>
+          : individual.map(b=><IndividualBuilding key={b.id} building={b} selectedBuildingId={selectedBuildingId} selectedFloor={b.id===selectedBuildingId?selectedFloor:null} hoveredFloor={!staticView&&hoverInfo?.building?.id===b.id?hoverInfo.floor:null} hovered={!staticView&&hoverInfo?.building?.id===b.id} onHover={staticView?undefined:setHoverInfo} onLeave={staticView?undefined:(bb=>setHoverInfo(v=>v?.building?.id===bb.id?null:v))} onSelectBuilding={staticView?undefined:onSelectBuilding} onSelectFloor={staticView?undefined:onSelectFloor} dimOthers={!!selectedBuildingId&&b.id!==selectedBuildingId} onBounds={setBound}/>)
         }
         {showBubbles&&<BuildingBubbleLayer buildings={buildings} boundsMap={boundsMap} selectedBuildingId={selectedBuildingId} onSelectBuilding={onSelectBuilding}/>}
         <Environment preset="city"/>
       </Suspense>
       {showGrid&&!publicMode&&<gridHelper args={[20,40,'#aeb6b1','#d3d8d5']} position={[0,-.001,0]}/>}
-      <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={.08} autoRotate={autoRotate} autoRotateSpeed={.65} minDistance={.7} maxDistance={80}/>
-      <CameraDirector buildings={buildings} boundsMap={boundsMap} selectedBuildingId={selectedBuildingId} preset={preset} controlsRef={controls} focusTick={focusTick} cinematic={publicMode}/>
+      <OrbitControls
+        ref={controls}
+        makeDefault
+        enabled={!staticView}
+        enableRotate={!staticView}
+        enablePan={!staticView}
+        enableZoom={!staticView}
+        enableDamping={!staticView}
+        dampingFactor={.08}
+        autoRotate={!staticView&&autoRotate}
+        autoRotateSpeed={.65}
+        minDistance={.7}
+        maxDistance={80}
+      />
+      <CameraDirector buildings={buildings} boundsMap={boundsMap} selectedBuildingId={selectedBuildingId} preset={preset} controlsRef={controls} focusTick={focusTick} cinematic={publicMode} staticView={staticView}/>
     </Canvas>
 
-    {hoverInfo&&<div className="model-tooltip" style={{left:Math.min(window.innerWidth-235,hoverInfo.clientX+16),top:Math.min(window.innerHeight-90,hoverInfo.clientY+16)}}>
+    {!staticView&&hoverInfo&&<div className="model-tooltip" style={{left:Math.min(window.innerWidth-235,hoverInfo.clientX+16),top:Math.min(window.innerHeight-90,hoverInfo.clientY+16)}}>
       <strong>{hoverInfo.building.name}</strong>
       {hoverInfo.stage==='building'
         ? <><span>Clădire</span><small>Click pentru prim-plan și etaje</small></>

@@ -1,3 +1,42 @@
+# Estate Studio — Build 04.5.6 Static Dashboard
+
+Build cumulativ peste 04.5.5.
+
+## Dashboard 3D
+Cadru 3D din Dashboard este acum strict de prezentare:
+- perspectivă fixă;
+- fără OrbitControls;
+- fără rotate / pan / zoom;
+- fără auto-rotate;
+- fără hover;
+- fără tooltip;
+- fără building bubbles;
+- fără animația de cameră la încărcare / refocus;
+- canvas-ul nu primește pointer events.
+
+Rămâne un cadru static al proiectului, ca un screenshot 3D generat live din model.
+
+## Dashboard metrics
+Eliminat complet:
+- `Inventar nou`;
+- comparația cu luna precedentă;
+- indicatorul de creștere / scădere;
+- explicația de la final despre istoricul de status.
+
+În locul metricii temporale există `Număr mediu camere`, calculat din tipologiile definite.
+
+Dashboard-ul rămâne momentan orientat pe:
+- distribuția inventarului;
+- disponibilitate;
+- tipologii / camere;
+- suprafețe;
+- prețuri;
+- distribuție per bloc.
+
+Fără statistici temporale de vânzare.
+
+`/api/version` => `04.5.6-static-dashboard`
+
 # Estate Studio — Build 04.5.5 Dashboard + Palette Highlight
 
 Build cumulativ peste 04.5.4.
