@@ -1,3 +1,38 @@
+# Estate Studio — Build 04.5.0 Modern UI Overhaul
+
+Redesign vizual complet, cumulativ peste 04.4.31. Nu schimbă logica existentă.
+
+Direcția vizuală este inspirată din dashboard-uri real-estate CRM moderne: suprafețe albe, canvas deschis, accent verde/mint, suport pastel, carduri cu radius mare, border fin și shadow discret.
+
+## Backend / Admin
+- sidebar alb, compact, cu branding verde;
+- background light cool-gray / sage;
+- header-ele Proiecte / proiect refăcute;
+- carduri proiect moderne;
+- navigația internă a proiectului refăcută ca wizard CRM;
+- panouri, formulare, upload zones, tabele și status pills refăcute;
+- modale, drawers și confirmări refăcute;
+- editorul de poligoane refăcut vizual;
+- detectorul PNG refăcut vizual;
+- shared 3D mapper refăcut vizual;
+- butoane și controale unificate;
+- responsive admin îmbunătățit.
+
+## Frontend public
+- paletă nouă white / sage / graphite;
+- branding și controale 3D cu surfaces moderne;
+- meniurile Blocuri / Etaje refăcute;
+- bubble-urile 3D refăcute;
+- viewer controls și tools refăcute;
+- popup plan etaj refăcut;
+- apartment strip și card apartament refăcute;
+- tooltip apartament refăcut;
+- wheel picker mobil armonizat cu noul design.
+
+Toate funcțiile acumulate până la 04.4.31 rămân prezente: mapping, detector PNG, editare poligoane, copy/flip/paste, copy floors/buildings, delete cu SIGUR, viewer desktop/mobile etc.
+
+`/api/version` => `04.5.0-modern-ui-overhaul`
+
 # Estate Studio — Build 04.4.31 Delete Buttons CSS Fix
 
 Hotfix vizual peste 04.4.30. Nu schimbă logica de ștergere.
