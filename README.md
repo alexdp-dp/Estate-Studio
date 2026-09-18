@@ -1,3 +1,70 @@
+# Estate Studio — Build 04.5.4 Unified Controls + Font Awesome + Gradient
+
+Build cumulativ peste 04.5.3.
+
+## Butoane
+- toate controalele standard din admin folosesc aceeași înălțime, radius, font și border;
+- editorul poligonal este normalizat complet: butoanele standalone și grupurile segmented au aceeași înălțime vizuală;
+- `Salvează poligon` nu mai este negru: folosește verdele închis din paletă;
+- stările active nu mai folosesc negru / aproape-negru.
+
+## Viewer 3D
+- busola are exact 42×42 px, aceeași dimensiune ca butoanele + / − / reset;
+- busola este aliniată pe aceeași coloană cu acele butoane;
+- controalele active folosesc paleta proiectului, nu negru.
+
+## Setup proiect
+- numerele și bifele au fost eliminate;
+- fiecare pas folosește icon Font Awesome:
+  - General: sliders
+  - Blocuri: building
+  - Model 3D: cube
+  - Calibrare: ruler-combined
+  - Etaje: layer-group
+  - Planuri & apartamente: draw-polygon
+  - Preview: eye
+  - Embed: code
+
+Este adăugată dependența `@fortawesome/fontawesome-free`.
+
+## Gradient vernil → mov
+Gradientul este folosit controlat în:
+- pasul activ din Setup proiect;
+- fallback-ul vizual al cardurilor de proiect;
+- selected state în Blocuri;
+- selected state în Etaje;
+- selected building bubble;
+- selected state în wheel picker mobil;
+- unele micro-accente de header.
+
+Blocul selectat și etajul selectat folosesc acum exact aceeași paletă.
+
+## Fără negru UI
+Suprafețele și stările vechi `#101512 / #111 / near-black` au fost înlocuite cu deep sage / dark green. Inclusiv ecranul de runtime error folosește dark sage.
+
+`/api/version` => `04.5.4-unified-controls-icons-gradient`
+
+# Estate Studio — Build 04.5.3 Plan Header Buttons Fix
+
+Hotfix vizual peste 04.5.2.
+
+## Planuri & apartamente
+- eliminat complet fundalul pastel multicolor din cardul etajului activ;
+- cardul revine la fundal alb simplu;
+- `Înlocuiește planul`, `Detectează apartamente`, `Copiază plan + mapare`, `Apartament`, `Șterge plan etaj` și `Șterge toate planurile` folosesc exact aceeași geometrie:
+  - 34 px înălțime;
+  - același padding;
+  - același radius;
+  - același font;
+  - același hover;
+- Detect / Copy / Replace sunt neutre, albe;
+- `Apartament` este singura acțiune pozitivă primary: verde închis + text alb, cu contrast puternic;
+- cele două acțiuni de ștergere au aceeași formă, doar border/text roșu.
+
+Nu schimbă noul layout 2/3 plan + 1/3 tabel din frontend.
+
+`/api/version` => `04.5.3-plan-header-buttons-fix`
+
 # Estate Studio — Build 04.5.2 Floor Table + Palette
 
 Build cumulativ peste 04.5.1.

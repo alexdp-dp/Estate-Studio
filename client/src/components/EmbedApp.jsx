@@ -266,7 +266,7 @@ export default function EmbedApp(){
 
     {building&&<aside className="macheta-floors">
       <div><small>{building.name} · PRIM-PLAN</small><b>Selectează etajul</b></div>
-      <div>{[...(building.floors||[])].reverse().map(f=><button key={f.id} onMouseEnter={()=>setActiveFloor(f)} onMouseLeave={()=>!floor&&setActiveFloor(null)} onClick={()=>{setActiveFloor(f);setFloor(f)}}><span>{f.name}</span><small>{f.apartments?.filter(a=>a.status==='available').length||0} disponibile</small></button>)}</div>
+      <div>{[...(building.floors||[])].reverse().map(f=><button key={f.id} className={(floor?.id===f.id||activeFloor?.id===f.id)?'active':''} onMouseEnter={()=>setActiveFloor(f)} onMouseLeave={()=>!floor&&setActiveFloor(null)} onClick={()=>{setActiveFloor(f);setFloor(f)}}><span>{f.name}</span><small>{f.apartments?.filter(a=>a.status==='available').length||0} disponibile</small></button>)}</div>
     </aside>}
 
     <div className="mobile-wheel-bar">

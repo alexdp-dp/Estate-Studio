@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import {BrowserRouter,Route,Routes} from 'react-router-dom';
 import AdminApp from './components/AdminApp';
 import EmbedApp from './components/EmbedApp';
+import '@fortawesome/fontawesome-free/css/all.min.css';
 import './styles.css';
 
 class ErrorBoundary extends React.Component {
@@ -22,15 +23,15 @@ class ErrorBoundary extends React.Component {
         <div style={{
           minHeight:'100vh',
           padding:'40px',
-          background:'#101512',
-          color:'#fff',
+          background:'#1d3a30',
+          color:'#f7fbf9',
           fontFamily:'system-ui,sans-serif'
         }}>
           <h1>Estate Studio nu a putut porni</h1>
-          <p style={{color:'#b9c4be'}}>Frontend runtime error:</p>
+          <p style={{color:'#cbd8d2'}}>Frontend runtime error:</p>
           <pre style={{
             whiteSpace:'pre-wrap',
-            background:'#171e1a',
+            background:'#29453a',
             padding:'16px',
             borderRadius:'12px'
           }}>
