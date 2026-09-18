@@ -4913,3 +4913,336 @@ button.ui-action:hover,
     grid-column:1/-1;
   }
 }
+
+
+/* ==========================================================================
+   04.6.0 — HYBRID 2D / 3D
+   ========================================================================== */
+
+/* --- Admin visual mode --- */
+.visual-mode-switch{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  padding:8px!important;
+  margin-bottom:16px;
+}
+.visual-mode-switch button{
+  min-height:78px;
+  display:grid;
+  grid-template-columns:34px 1fr;
+  grid-template-rows:auto auto;
+  column-gap:10px;
+  align-items:center;
+  padding:12px;
+  border:1px solid #dce5e0;
+  border-radius:7px;
+  background:#fff;
+  color:#40564c;
+  text-align:left;
+}
+.visual-mode-switch button i{
+  grid-row:1/3;
+  width:34px;height:34px;
+  display:grid;place-items:center;
+  border-radius:6px;
+  background:#eef4f1;
+  color:#71877c;
+  font-size:14px;
+}
+.visual-mode-switch button b{font-size:12px}
+.visual-mode-switch button span{color:#849189;font-size:9px;font-weight:500}
+.visual-mode-switch button.active{
+  background:linear-gradient(100deg,#e3f5ec,#efe8fa)!important;
+  border-color:#cadbd2!important;
+  color:#29483b!important;
+}
+.visual-mode-switch button.active i{
+  background:#fff;
+  color:#78629f;
+}
+.default-visual-choice{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  margin-bottom:22px;
+  background:linear-gradient(100deg,#f7fbf9,#faf8fd);
+}
+.default-visual-choice>div:first-child{display:grid;gap:3px}
+.default-visual-choice small{color:#819087;font-size:7px;font-weight:800;letter-spacing:.11em}
+.default-visual-choice b{color:#29483b;font-size:12px}
+.default-visual-choice .segmented{
+  display:flex;
+  gap:2px;
+  padding:2px;
+  border:1px solid #d8e2dd;
+  border-radius:6px;
+  background:#eef3f0;
+}
+.default-visual-choice .segmented button{
+  min-width:58px;height:32px;
+  border:0;border-radius:4px;
+  background:transparent;color:#63756b;font-weight:750;
+}
+.default-visual-choice .segmented button.active{
+  background:#fff;color:#755f9c;
+  box-shadow:0 1px 5px rgba(42,67,55,.08);
+}
+
+.model-2d-section,.model-3d-section{
+  display:grid;
+  gap:14px;
+  margin-top:8px;
+}
+.model-2d-section>.section-head,
+.model-3d-section>.section-head{
+  margin-top:12px;
+  margin-bottom:0;
+}
+.model-2d-upload{
+  min-height:175px;
+}
+.model-2d-upload i{
+  font-size:28px;
+  color:#8069a7;
+  margin-bottom:5px;
+}
+.model-2d-image-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:-2px;
+  background:linear-gradient(100deg,#f1f9f5,#f8f4fc);
+}
+.model-2d-image-head>div{
+  display:grid;
+  gap:2px;
+}
+.model-2d-image-head small{
+  color:#7c8d84;
+  font-size:7px;
+  font-weight:800;
+  letter-spacing:.12em;
+}
+.model-2d-image-head b{
+  color:#29483b;
+  font-size:13px;
+}
+.model-2d-image-head span{
+  color:#87958e;
+  font-size:9px;
+}
+.map-target-dot{
+  width:8px;height:8px;border-radius:50%;
+  flex:0 0 8px;
+}
+.calibration-2d-note{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  background:linear-gradient(100deg,#e8f6ef,#f1eafb);
+}
+.calibration-2d-note>i{
+  width:42px;height:42px;
+  display:grid;place-items:center;
+  border-radius:7px;background:#fff;color:#78639d;font-size:17px;
+}
+.calibration-2d-note>div{display:grid;gap:3px}
+.calibration-2d-note b{color:#29483b}
+.calibration-2d-note span{color:#72827a;font-size:10px}
+
+/* Generic mapper palette keeps the exact apartment polygon engine geometry. */
+.polygon-workspace .apartment-palette .map-target-dot{
+  margin-right:1px;
+}
+
+/* Dashboard 2D fallback */
+.dashboard-2d-hero{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+
+/* --- Public 2D viewer --- */
+.two-d-public-viewer{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+  padding:72px 92px 78px 285px;
+  background:
+    radial-gradient(circle at 20% 10%,rgba(220,244,232,.72),transparent 32%),
+    linear-gradient(135deg,#eef4f1,#f1eef7);
+}
+.two-d-public-stage{
+  position:relative;
+  max-width:100%;
+  max-height:100%;
+  display:inline-block;
+  line-height:0;
+  border:1px solid rgba(205,220,212,.82);
+  box-shadow:0 22px 62px rgba(34,57,46,.13);
+  background:#fff;
+}
+.two-d-public-stage>img{
+  display:block;
+  max-width:100%;
+  max-height:calc(100vh - 150px);
+  width:auto;
+  height:auto;
+  object-fit:contain;
+}
+.two-d-public-stage>svg{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  z-index:2;
+}
+.two-d-public-stage polygon{
+  cursor:pointer;
+  transition:fill .15s ease,stroke .15s ease;
+}
+.two-d-map-label{
+  position:absolute;
+  z-index:4;
+  transform:translate(-50%,-50%);
+  min-width:88px;
+  display:grid;
+  gap:1px;
+  padding:7px 9px;
+  border:1px solid rgba(213,224,218,.92);
+  border-radius:6px;
+  background:rgba(255,255,255,.91);
+  box-shadow:0 7px 20px rgba(24,48,36,.11);
+  color:#29483b;
+  text-align:left;
+  line-height:1.1;
+  cursor:pointer;
+  backdrop-filter:blur(7px);
+}
+.two-d-map-label b{
+  font-size:9px;
+  white-space:nowrap;
+}
+.two-d-map-label small{
+  color:#7c8b83;
+  font-size:7px;
+  white-space:nowrap;
+}
+.two-d-map-label.active{
+  background:linear-gradient(100deg,rgba(223,245,234,.96),rgba(238,229,255,.96));
+  border-color:#c5d7ce;
+}
+.two-d-public-missing{
+  min-width:310px;
+  display:grid;
+  place-items:center;
+  gap:7px;
+  padding:28px;
+  border:1px solid #dbe5e0;
+  border-radius:8px;
+  background:rgba(255,255,255,.76);
+  color:#6f8077;
+  text-align:center;
+}
+.two-d-public-missing i{
+  font-size:28px;
+  color:#826aa8;
+}
+.two-d-public-missing b{
+  color:#29483b;
+  font-size:13px;
+}
+.two-d-public-missing span{
+  max-width:330px;
+  font-size:9px;
+}
+
+/* 2D / 3D toggle */
+.macheta-visual-switch{
+  position:absolute;
+  z-index:103;
+  top:18px;
+  left:50%;
+  transform:translateX(-50%);
+  display:flex;
+  gap:2px;
+  padding:3px;
+  border:1px solid rgba(211,224,217,.96);
+  border-radius:7px;
+  background:rgba(255,255,255,.90);
+  box-shadow:0 9px 25px rgba(22,43,33,.09);
+  backdrop-filter:blur(12px);
+}
+.macheta-visual-switch button{
+  height:34px;
+  min-width:70px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  padding:0 11px;
+  border:0;
+  border-radius:5px;
+  background:transparent;
+  color:#6a7a72;
+  font-size:10px;
+  font-weight:800;
+}
+.macheta-visual-switch button.active{
+  background:linear-gradient(100deg,#dff5ea,#eee5ff);
+  color:#3e5148;
+  box-shadow:0 1px 5px rgba(34,57,46,.07);
+}
+.macheta-visual-switch button:disabled{
+  opacity:.35;
+  cursor:not-allowed;
+}
+.macheta-hint-2d{
+  display:flex!important;
+  align-items:center;
+  gap:6px;
+}
+
+/* 2D image sits below all existing Estate Studio UI */
+.two-d-public-viewer{z-index:1}
+.macheta-brand,.macheta-fullscreen,.macheta-visual-switch,.macheta-nav,.macheta-floors,
+.macheta-view-controls,.macheta-tools,.macheta-north,.macheta-hint,.mobile-wheel-bar{z-index:10}
+
+/* responsive */
+@media(max-width:1000px){
+  .visual-mode-switch{grid-template-columns:1fr}
+  .two-d-public-viewer{
+    padding:70px 24px 145px 225px;
+  }
+}
+@media(max-width:760px){
+  .model-2d-image-head{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+}
+@media(max-width:600px){
+  .two-d-public-viewer{
+    padding:66px 10px 176px;
+  }
+  .two-d-public-stage>img{
+    max-height:calc(100dvh - 250px);
+  }
+  .two-d-map-label{
+    min-width:65px;
+    padding:5px 6px;
+  }
+  .two-d-map-label b{font-size:8px}
+  .two-d-map-label small{display:none}
+  .macheta-visual-switch{
+    top:62px;
+    left:50%;
+  }
+}

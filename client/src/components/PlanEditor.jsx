@@ -15,12 +15,17 @@ function useHtmlImage(src){
 }
 
 function polygonPoints(apartment){
+  if(Array.isArray(apartment?.points)) return apartment.points;
   const rel=apartment?.apartment_polygons;
   if(Array.isArray(rel)) return rel[0]?.points||[];
   return rel?.points||[];
 }
 
 function apartmentPolygonColor(a,active=false){
+  if(a?._map_color){
+    const c=a._map_color;
+    return active?(c.active||c.fill||'rgba(83,119,104,.46)'):(c.fill||'rgba(118,151,137,.26)');
+  }
   if(a?.status==='reserved') return active?'rgba(198,130,16,.46)':'rgba(228,161,44,.24)';
   if(a?.status==='sold') return active?'rgba(190,49,49,.46)':'rgba(215,76,76,.24)';
 
@@ -235,7 +240,22 @@ function editorConfirm({
   });
 }
 
-export default function PlanEditor({floor,onChanged}){
+export default function PlanEditor({
+  floor,
+  onChanged,
+  imageUrl=null,
+  targets=null,
+  editorKey=null,
+  paletteTitle='Apartamente',
+  emptyText='Creează întâi apartamente pentru acest etaj.',
+  targetKind='apartament',
+  onSaveTargetPolygon=null,
+  onDeleteTargetPolygon=null,
+  selectedTargetId=null,
+  onSelectedTargetChange=null,
+  imageFlipH=null,
+  imageFlipV=null
+}){
   const holder=useRef();
   const stageRef=useRef();
   const viewportRef=useRef();
@@ -246,12 +266,15 @@ export default function PlanEditor({floor,onChanged}){
   const spaceHeld=useRef(false);
   const tempPan=useRef({active:false,startPointer:null,startPos:null});
   const undoRef=useRef([]);
-  const image=useHtmlImage(floor?.plan_path);
+  const genericMode=Array.isArray(targets);
+  const entities=genericMode?targets:(floor?.apartments||[]);
+  const sourceImage=genericMode?imageUrl:floor?.plan_path;
+  const image=useHtmlImage(sourceImage);
 
   const [size,setSize]=useState({w:900,h:600});
   const [scale,setScale]=useState(1);
   const [pos,setPos]=useState({x:0,y:0});
-  const [selectedId,setSelectedId]=useState(floor?.apartments?.[0]?.id||null);
+  const [selectedId,setSelectedId]=useState(selectedTargetId||entities?.[0]?.id||null);
   const [draft,setDraft]=useState([]);
   const [mode,setMode]=useState('edit');
   const [busy,setBusy]=useState(false);
@@ -269,21 +292,30 @@ export default function PlanEditor({floor,onChanged}){
   const [flipV,setFlipV]=useState(false);
   const [moveWhole,setMoveWhole]=useState(false);
 
-  const selected=(floor?.apartments||[]).find(a=>a.id===selectedId);
-  const planFlipH=!!floor?.settings?.plan_flip_h;
-  const planFlipV=!!floor?.settings?.plan_flip_v;
+  const selected=(entities||[]).find(a=>a.id===selectedId);
+  const planFlipH=imageFlipH!==null?!!imageFlipH:!!floor?.settings?.plan_flip_h;
+  const planFlipV=imageFlipV!==null?!!imageFlipV:!!floor?.settings?.plan_flip_v;
+  const entityLabel=e=>String(e?.code||e?.name||e?.label||e?.title||targetKind||'element');
+  const sceneIdentity=genericMode?(editorKey||sourceImage||'generic'):(floor?.id||'floor');
+  const chooseEntity=id=>{
+    setSelectedId(id);
+    onSelectedTargetChange?.(id);
+  };
 
   useEffect(()=>{draftRef.current=draft},[draft]);
 
   useEffect(()=>{
-    setSelectedId(floor?.apartments?.[0]?.id||null);
+    const requested=selectedTargetId&&(entities||[]).some(e=>e.id===selectedTargetId)?selectedTargetId:null;
+    const nextId=requested||entities?.[0]?.id||null;
+    setSelectedId(nextId);
+    onSelectedTargetChange?.(nextId);
     setScale(1);
     setPos({x:0,y:0});
     setCopiedPolygon(null);
     setFlipH(false);
     setFlipV(false);
     setMoveWhole(false);
-  },[floor?.id]);
+  },[sceneIdentity]);
 
   useEffect(()=>{
     const ro=new ResizeObserver(([e])=>{
@@ -306,7 +338,7 @@ export default function PlanEditor({floor,onChanged}){
     undoRef.current=[];
     setUndoCount(0);
     setNotice('');
-  },[selectedId,selected?.apartment_polygons]);
+  },[selectedId,selected?.apartment_polygons,selected?.points]);
 
   useEffect(()=>{
     function setStageCursor(cursor){
@@ -523,12 +555,12 @@ export default function PlanEditor({floor,onChanged}){
     }
     setCopiedPolygon({
       sourceId:selected.id,
-      sourceCode:selected.code,
+      sourceCode:entityLabel(selected),
       points:current.map(cleanPoint)
     });
     setFlipH(false);
     setFlipV(false);
-    setNotice(`Copiat ${selected.code} · alege apartamentul țintă`);
+    setNotice(`Copiat ${entityLabel(selected)} · alege ${targetKind} țintă`);
   }
 
   function pasteAndMove(){
@@ -604,15 +636,20 @@ export default function PlanEditor({floor,onChanged}){
     if(!hasPolygon){setNotice('Apartamentul selectat nu are poligon.');return;}
 
     const ok=await editorConfirm({
-      title:`Șterge poligonul ${selected.code}`,
-      message:'Se șterge doar maparea/poligonul acestui apartament. Apartamentul și datele lui comerciale rămân.',
+      title:`Șterge poligonul ${entityLabel(selected)}`,
+      message:genericMode?`Se șterge doar maparea 2D pentru ${entityLabel(selected)}.`:'Se șterge doar maparea/poligonul acestui apartament. Apartamentul și datele lui comerciale rămân.',
       confirmLabel:'Da, șterge poligonul'
     });
     if(!ok)return;
 
     setBusy(true);
     try{
-      await api(`/admin/apartments/${selected.id}/polygon`,{method:'DELETE'});
+      if(genericMode){
+        if(!onDeleteTargetPolygon)throw new Error('Callback de ștergere lipsă.');
+        await onDeleteTargetPolygon(selected.id);
+      }else{
+        await api(`/admin/apartments/${selected.id}/polygon`,{method:'DELETE'});
+      }
       draftRef.current=[];
       undoRef.current=[];
       setDraft([]);
@@ -635,10 +672,15 @@ export default function PlanEditor({floor,onChanged}){
     if(draftRef.current.length<3){setNotice('Poligonul are nevoie de cel puțin 3 puncte.');return;}
     setBusy(true);setNotice('');
     try{
-      const saved=await api(`/admin/apartments/${selected.id}/polygon`,{
-        method:'PUT',body:{points:draftRef.current}
-      });
-      if(!saved?.apartment_id)throw new Error('Serverul nu a confirmat salvarea poligonului.');
+      if(genericMode){
+        if(!onSaveTargetPolygon)throw new Error('Callback de salvare lipsă.');
+        await onSaveTargetPolygon(selected.id,draftRef.current.map(cleanPoint));
+      }else{
+        const saved=await api(`/admin/apartments/${selected.id}/polygon`,{
+          method:'PUT',body:{points:draftRef.current}
+        });
+        if(!saved?.apartment_id)throw new Error('Serverul nu a confirmat salvarea poligonului.');
+      }
       setNotice(`Salvat · ${draftRef.current.length} puncte`);
       await onChanged?.();
     }catch(e){
@@ -842,7 +884,7 @@ export default function PlanEditor({floor,onChanged}){
             onClick={pasteAndMove}
           >Lipește și mută</button>
         </div>
-        <button onClick={()=>{setScale(1);setPos({x:0,y:0})}}>Încadrează planul</button>
+        <button onClick={()=>{setScale(1);setPos({x:0,y:0})}}>{genericMode?'Încadrează imaginea':'Încadrează planul'}</button>
         <button className="primary" disabled={busy||!selected} onClick={savePolygon}>{busy?'Salvez…':'Salvează poligon'}</button>
         {notice&&<span className="save-notice">✓ {notice}</span>}
         <span className="zoom-label">{Math.round(scale*100)}%</span>
@@ -850,15 +892,17 @@ export default function PlanEditor({floor,onChanged}){
 
       <div className="polygon-layout">
         <div className="apartment-palette">
-          <h4>Apartamente</h4>
+          <h4>{paletteTitle}</h4>
           {copiedPolygon&&<div className="empty-mini copy-mini">Copiat: <b>{copiedPolygon.sourceCode}</b>{flipH||flipV?` · Flip ${flipH?'H':''}${flipH&&flipV?'+':''}${flipV?'V':''}`:''}</div>}
-          {(floor?.apartments||[]).length===0&&<div className="empty-mini">Creează întâi apartamente pentru acest etaj.</div>}
-          {(floor?.apartments||[]).map(a=><button
+          {(entities||[]).length===0&&<div className="empty-mini">{emptyText}</div>}
+          {(entities||[]).map((a,index)=><button
             key={a.id}
             className={'ap-row '+(selectedId===a.id?'selected':'')}
-            onClick={()=>{setSelectedId(a.id);setMode('edit')}}
+            onClick={()=>{chooseEntity(a.id);setMode('edit')}}
           >
-            <span className={'status-dot '+a.status}/><b>{a.code}</b><small>{statusLabel[a.status]}</small>
+            <span className={genericMode?'map-target-dot':('status-dot '+a.status)} style={genericMode?{background:a._map_dot||['#9fcea0','#9c84c7','#7aa4cf','#e1bd64'][index%4]}:undefined}/>
+            <b>{entityLabel(a)}</b>
+            <small>{genericMode?(polygonPoints(a).length>=3?'mapat':'nemapat'):statusLabel[a.status]}</small>
           </button>)}
         </div>
 
@@ -896,7 +940,7 @@ export default function PlanEditor({floor,onChanged}){
                   listening={false}
                 />} 
 
-                {(floor?.apartments||[]).filter(a=>a.id!==selectedId).map(a=>{
+                {(entities||[]).filter(a=>a.id!==selectedId).map(a=>{
                   const ps=polygonPoints(a);
                   if(ps.length<3)return null;
                   return <Line
@@ -920,19 +964,19 @@ export default function PlanEditor({floor,onChanged}){
                     onClick={e=>{
                       if(spaceHeld.current||tempPan.current.active||e?.evt?.button===1)return;
                       e.cancelBubble=true;
-                      setSelectedId(a.id);
+                      chooseEntity(a.id);
                       setMode('edit');
                       setSelectedVertex(null);
                       setSelectedEdge(null);
-                      setNotice(`Selectat ${a.code}`);
+                      setNotice(`Selectat ${entityLabel(a)}`);
                     }}
                     onTap={e=>{
                       e.cancelBubble=true;
-                      setSelectedId(a.id);
+                      chooseEntity(a.id);
                       setMode('edit');
                       setSelectedVertex(null);
                       setSelectedEdge(null);
-                      setNotice(`Selectat ${a.code}`);
+                      setNotice(`Selectat ${entityLabel(a)}`);
                     }}
                   />;
                 })}
@@ -941,7 +985,7 @@ export default function PlanEditor({floor,onChanged}){
                   <Line
                     points={draft.flatMap(p=>[imgRect.x+p.x*imgRect.w,imgRect.y+p.y*imgRect.h])}
                     closed={draft.length>=3}
-                    fill={apartmentPolygonColor(selected,true)} stroke="#0e8f48" strokeWidth={2/scale}
+                    fill={apartmentPolygonColor(selected,true)} stroke="#356b57" strokeWidth={2/scale}
                     listening={moveWhole}
                     onMouseEnter={()=>{if(moveWhole&&!spaceHeld.current)setStageCursor('move')}}
                     onMouseLeave={()=>{if(moveWhole&&!spaceHeld.current&&!editGesture.current)setStageCursor('default')}}
@@ -1013,10 +1057,12 @@ export default function PlanEditor({floor,onChanged}){
       </div>
 
       <p className="hint">
-        Poți selecta apartamentul direct din listă sau prin <b>click pe poligon</b>. Pentru clonare pe același plan: selectează sursa,
-        <b>Copiază poligon</b>, alege apartamentul țintă, opțional <b>Flip H</b>/<b>Flip V</b>, apoi <b>Lipește și mută</b>.
-        După lipire, trage de <b>interiorul poligonului</b> ca să muți toată geometria; Flip-ul se face în jurul centrului propriei forme.
-        Punctele, laturile, Undo, dublu-click pentru punct nou și <b>Space + drag</b> pentru pan rămân active.
+        {genericMode
+          ? <>Acesta este <b>același motor de poligoane</b> folosit la planurile apartamentelor: selectare direct pe poligon, puncte și laturi editabile, Undo, Snap, Copy/Flip/Paste, dublu-click pentru punct nou și <b>Space + drag</b> pentru pan.</>
+          : <>Poți selecta apartamentul direct din listă sau prin <b>click pe poligon</b>. Pentru clonare pe același plan: selectează sursa,
+          <b>Copiază poligon</b>, alege apartamentul țintă, opțional <b>Flip H</b>/<b>Flip V</b>, apoi <b>Lipește și mută</b>.
+          După lipire, trage de <b>interiorul poligonului</b> ca să muți toată geometria; Flip-ul se face în jurul centrului propriei forme.
+          Punctele, laturile, Undo, dublu-click pentru punct nou și <b>Space + drag</b> pentru pan rămân active.</>}
       </p>
     </div>
   );

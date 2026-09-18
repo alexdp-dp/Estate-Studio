@@ -6,7 +6,7 @@ const PlanEditor=lazy(()=>import('./PlanEditor'));
 const AutoApartmentDetector=lazy(()=>import('./AutoApartmentDetector'));
 const SharedModelMapper=lazy(()=>import('./SharedModelMapper'));
 
-const STEPS=[['general','General'],['buildings','Blocuri'],['model','Model 3D'],['calibration','Calibrare'],['floors','Etaje'],['plans','Planuri & apartamente'],['preview','Preview'],['embed','Embed'],['dashboard','Dashboard'],['links','Linkuri publice']];
+const STEPS=[['general','General'],['buildings','Blocuri'],['model','Model 2D / 3D'],['calibration','Calibrare'],['floors','Etaje'],['plans','Planuri & apartamente'],['preview','Preview'],['embed','Embed'],['dashboard','Dashboard'],['links','Linkuri publice']];
 const STEP_ICONS={
   general:'fa-sliders',
   buildings:'fa-building',
@@ -252,61 +252,234 @@ function Buildings({p,reload}){
 function Model({p,reload}){
   const [bid,setBid]=useState(p.buildings?.[0]?.id);
   const b=p.buildings.find(x=>x.id===bid)||p.buildings[0];
-  const mode=p.settings?.model_mode||'individual';
-  const shared=p.settings?.shared_model||{up_axis:'Y',reference_real_height_m:27,display_height_units:2.7,auto_ground:true};
 
-  async function patchProjectSettings(extra){
-    await api(`/admin/projects/${p.id}`,{method:'PATCH',body:{settings:{...(p.settings||{}),...extra}}});reload()
+  const visualMode=p.settings?.visual_mode||'3d';
+  const defaultVisual=p.settings?.default_visual||(visualMode==='2d'?'2d':'3d');
+  const modelMode=p.settings?.model_mode||'individual';
+  const shared=p.settings?.shared_model||{up_axis:'Y',reference_real_height_m:27,display_height_units:2.7,auto_ground:true};
+  const twoD=p.settings?.two_d||{overview:{},buildings:{}};
+  const overview=twoD.overview||{};
+  const buildingScene=(twoD.buildings||{})[b?.id]||{};
+
+  const palette=[
+    {fill:'rgba(168,207,163,.27)',active:'rgba(113,174,116,.48)',dot:'#9fcea0'},
+    {fill:'rgba(138,115,184,.25)',active:'rgba(112,83,164,.46)',dot:'#9c84c7'},
+    {fill:'rgba(122,164,207,.23)',active:'rgba(85,132,178,.46)',dot:'#7aa4cf'},
+    {fill:'rgba(225,189,100,.22)',active:'rgba(190,148,52,.43)',dot:'#e1bd64'}
+  ];
+
+  async function patchProjectSettings(extra,{reloadAfter=true}={}){
+    await api(`/admin/projects/${p.id}`,{method:'PATCH',body:{settings:{...(p.settings||{}),...extra}}});
+    if(reloadAfter)await reload();
   }
-  async function setMode(next){
-    await patchProjectSettings({model_mode:next});
+  async function setVisualMode(next){
+    const patch={visual_mode:next};
+    if(next!=='both')patch.default_visual=next;
+    await patchProjectSettings(patch);
   }
   async function patchShared(patch){
     await patchProjectSettings({shared_model:{...shared,...patch}});
   }
   async function uploadShared(file){
-    const fd=new FormData();fd.append('file',file);fd.append('project_id',p.id);fd.append('asset_type','shared-complex-model');
+    const fd=new FormData();
+    fd.append('file',file);fd.append('project_id',p.id);fd.append('asset_type','shared-complex-model');
     const u=await api('/admin/upload/models',{method:'POST',body:fd});
     await patchShared({url:u.url});
+  }
+
+  async function saveTwoD(nextTwoD,{reloadAfter=true}={}){
+    await patchProjectSettings({two_d:nextTwoD},{reloadAfter});
+  }
+  async function uploadOverview(file){
+    const fd=new FormData();
+    fd.append('file',file);fd.append('project_id',p.id);fd.append('asset_type','2d-overview-render');
+    const u=await api('/admin/upload/project-images',{method:'POST',body:fd});
+    await saveTwoD({...twoD,overview:{...overview,image_url:u.url}});
+  }
+  async function uploadBuildingImage(file){
+    if(!b)return;
+    const fd=new FormData();
+    fd.append('file',file);fd.append('project_id',p.id);fd.append('building_id',b.id);fd.append('asset_type','2d-building-render');
+    const u=await api('/admin/upload/project-images',{method:'POST',body:fd});
+    await saveTwoD({...twoD,buildings:{...(twoD.buildings||{}),[b.id]:{...buildingScene,image_url:u.url}}});
+  }
+  async function saveOverviewPolygon(targetId,points){
+    const nextOverview={...overview,polygons:{...(overview.polygons||{}),[targetId]:points}};
+    await saveTwoD({...twoD,overview:nextOverview},{reloadAfter:false});
+  }
+  async function deleteOverviewPolygon(targetId){
+    const polygons={...(overview.polygons||{})};
+    delete polygons[targetId];
+    await saveTwoD({...twoD,overview:{...overview,polygons}},{reloadAfter:false});
+  }
+  async function saveFloorPolygon(targetId,points){
+    if(!b)return;
+    const nextScene={...buildingScene,polygons:{...(buildingScene.polygons||{}),[targetId]:points}};
+    await saveTwoD({...twoD,buildings:{...(twoD.buildings||{}),[b.id]:nextScene}},{reloadAfter:false});
+  }
+  async function deleteFloorPolygon(targetId){
+    if(!b)return;
+    const polygons={...(buildingScene.polygons||{})};
+    delete polygons[targetId];
+    const nextScene={...buildingScene,polygons};
+    await saveTwoD({...twoD,buildings:{...(twoD.buildings||{}),[b.id]:nextScene}},{reloadAfter:false});
   }
 
   if(!b)return <div className="empty-state"><b>Adaugă întâi un bloc.</b></div>;
 
   async function patchBuilding(body){await api(`/admin/buildings/${b.id}`,{method:'PATCH',body});reload()}
   async function uploadIndividual(file){
-    const fd=new FormData();fd.append('file',file);fd.append('project_id',p.id);fd.append('building_id',b.id);fd.append('asset_type','building-model');
-    const u=await api('/admin/upload/models',{method:'POST',body:fd});await patchBuilding({model_path:u.url})
+    const fd=new FormData();
+    fd.append('file',file);fd.append('project_id',p.id);fd.append('building_id',b.id);fd.append('asset_type','building-model');
+    const u=await api('/admin/upload/models',{method:'POST',body:fd});
+    await patchBuilding({model_path:u.url});
   }
 
+  const buildingTargets=(p.buildings||[]).map((item,index)=>({
+    id:item.id,
+    name:item.name,
+    points:overview.polygons?.[item.id]||[],
+    _map_color:palette[index%palette.length],
+    _map_dot:palette[index%palette.length].dot
+  }));
+  const floorTargets=(b.floors||[]).map((item,index)=>({
+    id:item.id,
+    name:item.name,
+    points:buildingScene.polygons?.[item.id]||[],
+    _map_color:palette[index%palette.length],
+    _map_dot:palette[index%palette.length].dot
+  }));
+
+  const includes2D=visualMode==='2d'||visualMode==='both';
+  const includes3D=visualMode==='3d'||visualMode==='both';
+
   return <>
-    <SectionHead kicker="03 · MODEL 3D" title="Modelul ansamblului" desc="Poți păstra fluxul clasic cu un GLB per bloc sau poți încărca un singur GLB cu întregul complex și mapa clădirile."/>
-    <div className="model-mode-switch panel">
-      <button className={mode==='individual'?'active':''} onClick={()=>setMode('individual')}><b>GLB separat per bloc</b><span>Fluxul existent, neschimbat</span></button>
-      <button className={mode==='shared'?'active':''} onClick={()=>setMode('shared')}><b>GLB comun · complex</b><span>Un singur model, mai multe clădiri mapate</span></button>
+    <SectionHead
+      kicker="03 · MODEL 2D / 3D"
+      title="Vizualizarea ansamblului"
+      desc="Proiectul poate funcționa doar cu randări 2D, doar cu model 3D sau în mod hibrid, cu selector 2D / 3D în frontend."
+    />
+
+    <div className="visual-mode-switch panel">
+      <button className={visualMode==='2d'?'active':''} onClick={()=>setVisualMode('2d')}>
+        <i className="fa-solid fa-image"/><b>Doar 2D</b><span>Randări + poligoane interactive</span>
+      </button>
+      <button className={visualMode==='3d'?'active':''} onClick={()=>setVisualMode('3d')}>
+        <i className="fa-solid fa-cube"/><b>Doar 3D</b><span>GLB individual sau comun</span>
+      </button>
+      <button className={visualMode==='both'?'active':''} onClick={()=>setVisualMode('both')}>
+        <i className="fa-solid fa-layer-group"/><b>2D + 3D</b><span>Utilizatorul poate comuta între ele</span>
+      </button>
     </div>
 
-    {mode==='individual'?<>
-      <SectionHead kicker="MODEL INDIVIDUAL" title="Modelul clădirii" desc="Încarcă GLB/GLTF pentru fiecare bloc. Modelul apare imediat în preview." actions={<select value={b.id} onChange={e=>setBid(e.target.value)}>{p.buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>}/>
-      <div className="model-grid"><div className="panel preview-panel"><ThreeViewer buildings={[b]} selectedBuildingId={b.id}/></div><div className="panel settings-panel"><h3>{b.name}</h3><label className="upload-zone"><input type="file" accept=".glb,.gltf,model/gltf-binary" onChange={e=>e.target.files[0]&&uploadIndividual(e.target.files[0])}/><b>{b.model_path?'Înlocuiește GLB/GLTF':'Încarcă GLB/GLTF'}</b><span>{b.model_path?'Model încărcat ✓':'max 50 MB'}</span></label>{b.model_path&&<><p className="hint break-url">{b.model_path}</p><div className="notice">Fluxul existent rămâne intact. Scalarea și orientarea se fac la runtime.</div></>}</div></div>
-    </>:<>
-      <div className="model-grid shared-model-top">
-        <div className="panel preview-panel"><ThreeViewer buildings={p.buildings} sharedModel={shared.url?shared:null} selectedBuildingId={null}/></div>
-        <div className="panel settings-panel">
-          <h3>GLB comun al ansamblului</h3>
-          <label className="upload-zone"><input type="file" accept=".glb,.gltf,model/gltf-binary" onChange={e=>e.target.files[0]&&uploadShared(e.target.files[0])}/><b>{shared.url?'Înlocuiește GLB comun':'Încarcă GLB comun'}</b><span>{shared.url?'Model comun încărcat ✓':'toate blocurile în pozițiile lor originale'}</span></label>
-          <div className="form-grid one shared-calibration">
-            <label>Înălțime reală de referință (m)<input type="number" step=".01" defaultValue={shared.reference_real_height_m||27} onBlur={e=>patchShared({reference_real_height_m:+e.target.value})}/></label>
-            <label>Înălțime internă / display units<input type="number" step=".1" defaultValue={shared.display_height_units||2.7} onBlur={e=>patchShared({display_height_units:+e.target.value})}/></label>
-            <label>Axa verticală<select defaultValue={shared.up_axis||'Y'} onChange={e=>patchShared({up_axis:e.target.value})}><option>Y</option><option>Z</option><option>X</option></select></label>
-          </div>
-          <div className="notice">GLB-ul se încarcă o singură dată. Maparea de mai jos spune Estate Studio ce geometrie aparține fiecărui bloc, fără să taie sau să dubleze fișierul.</div>
-        </div>
+    {visualMode==='both'&&<div className="panel default-visual-choice">
+      <div><small>VEDERE IMPLICITĂ ÎN FRONTEND</small><b>Cu ce vedere se deschide proiectul?</b></div>
+      <div className="segmented">
+        <button className={defaultVisual==='2d'?'active':''} onClick={()=>patchProjectSettings({default_visual:'2d'})}>2D</button>
+        <button className={defaultVisual==='3d'?'active':''} onClick={()=>patchProjectSettings({default_visual:'3d'})}>3D</button>
       </div>
-      {shared.url&&<div className="panel shared-mapper-panel"><SharedModelMapper project={p} reload={reload}/></div>}
-    </>}
+    </div>}
+
+    {includes2D&&<div className="model-2d-section">
+      <SectionHead
+        kicker="RANDĂRI 2D · ANSAMBLU"
+        title="Imagine generală și maparea blocurilor"
+        desc="Încarcă randarea ansamblului și trasează peste fiecare bloc un poligon. Editorul este exact motorul folosit la maparea apartamentelor."
+      />
+
+      {!overview.image_url?<div className="panel">
+        <label className="upload-zone model-2d-upload">
+          <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadOverview(e.target.files[0])}/>
+          <i className="fa-solid fa-image"/>
+          <b>Încarcă randarea ansamblului</b>
+          <span>PNG / JPG / WEBP · perspectivă, bird's-eye sau randare comercială</span>
+        </label>
+      </div>:<>
+        <div className="panel model-2d-image-head">
+          <div><small>RANDĂRI 2D</small><b>Ansamblu · mapare blocuri</b><span>{buildingTargets.filter(x=>x.points.length>=3).length}/{buildingTargets.length} blocuri mapate</span></div>
+          <label className="button-file"><input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadOverview(e.target.files[0])}/><i className="fa-solid fa-rotate"/> Înlocuiește imaginea</label>
+        </div>
+        <PlanEditor
+          imageUrl={overview.image_url}
+          targets={buildingTargets}
+          editorKey={`overview-${overview.image_url}`}
+          paletteTitle="Blocuri"
+          emptyText="Adaugă întâi blocurile proiectului."
+          targetKind="bloc"
+          onSaveTargetPolygon={saveOverviewPolygon}
+          onDeleteTargetPolygon={deleteOverviewPolygon}
+          onChanged={reload}
+        />
+      </>}
+
+      <SectionHead
+        kicker="RANDĂRI 2D · BLOC"
+        title="Imaginea blocului și maparea etajelor"
+        desc="Încarcă o randare pentru fiecare bloc. Pe ea mapezi etajele cu același editor de poligoane."
+        actions={<select value={b.id} onChange={e=>setBid(e.target.value)}>{p.buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>}
+      />
+
+      {!buildingScene.image_url?<div className="panel">
+        <label className="upload-zone model-2d-upload">
+          <input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadBuildingImage(e.target.files[0])}/>
+          <i className="fa-solid fa-building"/>
+          <b>Încarcă randarea pentru {b.name}</b>
+          <span>Poate fi frontală, în perspectivă sau o elevație randată.</span>
+        </label>
+      </div>:<>
+        <div className="panel model-2d-image-head">
+          <div><small>{b.name.toUpperCase()}</small><b>Mapare etaje</b><span>{floorTargets.filter(x=>x.points.length>=3).length}/{floorTargets.length} etaje mapate</span></div>
+          <label className="button-file"><input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadBuildingImage(e.target.files[0])}/><i className="fa-solid fa-rotate"/> Înlocuiește imaginea</label>
+        </div>
+        <PlanEditor
+          imageUrl={buildingScene.image_url}
+          targets={floorTargets}
+          editorKey={`building-${b.id}-${buildingScene.image_url}`}
+          paletteTitle="Etaje"
+          emptyText="Generează întâi etajele blocului."
+          targetKind="etaj"
+          onSaveTargetPolygon={saveFloorPolygon}
+          onDeleteTargetPolygon={deleteFloorPolygon}
+          onChanged={reload}
+        />
+      </>}
+    </div>}
+
+    {includes3D&&<div className="model-3d-section">
+      <SectionHead kicker="MODEL 3D" title="Sursa modelului 3D" desc="Poți folosi un GLB separat pentru fiecare bloc sau un singur GLB cu întregul complex."/>
+
+      <div className="model-mode-switch panel">
+        <button className={modelMode==='individual'?'active':''} onClick={()=>patchProjectSettings({model_mode:'individual'})}><b>GLB separat per bloc</b><span>Un model pentru fiecare clădire</span></button>
+        <button className={modelMode==='shared'?'active':''} onClick={()=>patchProjectSettings({model_mode:'shared'})}><b>GLB comun · complex</b><span>Un singur model, mai multe clădiri mapate</span></button>
+      </div>
+
+      {modelMode==='individual'?<>
+        <SectionHead kicker="MODEL INDIVIDUAL" title="Modelul clădirii" desc="Încarcă GLB/GLTF pentru fiecare bloc. Modelul apare imediat în preview." actions={<select value={b.id} onChange={e=>setBid(e.target.value)}>{p.buildings.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>}/>
+        <div className="model-grid"><div className="panel preview-panel"><ThreeViewer buildings={[b]} selectedBuildingId={b.id}/></div><div className="panel settings-panel"><h3>{b.name}</h3><label className="upload-zone"><input type="file" accept=".glb,.gltf,model/gltf-binary" onChange={e=>e.target.files[0]&&uploadIndividual(e.target.files[0])}/><b>{b.model_path?'Înlocuiește GLB/GLTF':'Încarcă GLB/GLTF'}</b><span>{b.model_path?'Model încărcat ✓':'max 50 MB'}</span></label>{b.model_path&&<><p className="hint break-url">{b.model_path}</p><div className="notice">Scalarea și orientarea se fac la runtime.</div></>}</div></div>
+      </>:<>
+        <div className="model-grid shared-model-top">
+          <div className="panel preview-panel"><ThreeViewer buildings={p.buildings} sharedModel={shared.url?shared:null} selectedBuildingId={null}/></div>
+          <div className="panel settings-panel">
+            <h3>GLB comun al ansamblului</h3>
+            <label className="upload-zone"><input type="file" accept=".glb,.gltf,model/gltf-binary" onChange={e=>e.target.files[0]&&uploadShared(e.target.files[0])}/><b>{shared.url?'Înlocuiește GLB comun':'Încarcă GLB comun'}</b><span>{shared.url?'Model comun încărcat ✓':'toate blocurile în pozițiile lor originale'}</span></label>
+            <div className="form-grid one shared-calibration">
+              <label>Înălțime reală de referință (m)<input type="number" step=".01" defaultValue={shared.reference_real_height_m||27} onBlur={e=>patchShared({reference_real_height_m:+e.target.value})}/></label>
+              <label>Înălțime internă / display units<input type="number" step=".1" defaultValue={shared.display_height_units||2.7} onBlur={e=>patchShared({display_height_units:+e.target.value})}/></label>
+              <label>Axa verticală<select defaultValue={shared.up_axis||'Y'} onChange={e=>patchShared({up_axis:e.target.value})}><option>Y</option><option>Z</option><option>X</option></select></label>
+            </div>
+            <div className="notice">GLB-ul se încarcă o singură dată. Maparea de mai jos spune Estate Studio ce geometrie aparține fiecărui bloc, fără să taie sau să dubleze fișierul.</div>
+          </div>
+        </div>
+        {shared.url&&<div className="panel shared-mapper-panel"><SharedModelMapper project={p} reload={reload}/></div>}
+      </>}
+    </div>}
   </>
 }
 function Calibration({p,reload}){
+  if((p.settings?.visual_mode||'3d')==='2d')return <>
+    <SectionHead kicker="04 · CALIBRARE" title="Calibrarea 3D nu este necesară" desc="Proiectul este configurat în modul Doar 2D. Randările și poligoanele folosesc coordonate relative 0–100% și nu au nevoie de scară 3D."/>
+    <div className="panel calibration-2d-note"><i className="fa-solid fa-image"/><div><b>Mod 2D activ</b><span>Poți continua direct cu Etaje și Planuri & apartamente.</span></div></div>
+  </>;
   const sharedMode=p.settings?.model_mode==='shared';
   const shared=p.settings?.shared_model||{};
   const [bid,setBid]=useState(p.buildings?.[0]?.id);
@@ -753,6 +926,10 @@ function Dashboard({p}){
 
   const money=v=>v?new Intl.NumberFormat('ro-RO',{maximumFractionDigits:0}).format(v)+' €':'—';
   const sharedModel=p.settings?.shared_model?.url?p.settings.shared_model:null;
+  const overview2D=p.settings?.two_d?.overview?.image_url||null;
+  const visualMode=p.settings?.visual_mode||'3d';
+  const hasAny3D=!!sharedModel||(p.buildings||[]).some(b=>!!b.model_path);
+  const use2DHero=!!overview2D&&(visualMode==='2d'||!hasAny3D);
 
   const roomMetrics=[
     {label:'Studio / 1 cameră',value:studios,className:'studio'},
@@ -775,9 +952,9 @@ function Dashboard({p}){
           <span>{(p.buildings||[]).length} blocuri</span>
         </div>
         <div className="dashboard-3d-frame">
-          <Suspense fallback={<div className="dashboard-3d-loading">Se încarcă modelul 3D…</div>}>
+          {use2DHero?<img className="dashboard-2d-hero" src={overview2D} alt={p.name}/>:<Suspense fallback={<div className="dashboard-3d-loading">Se încarcă modelul 3D…</div>}>
             <ThreeViewer buildings={p.buildings||[]} sharedModel={sharedModel} compact staticView showGrid={false} showBubbles={false}/>
-          </Suspense>
+          </Suspense>}
         </div>
       </div>
 

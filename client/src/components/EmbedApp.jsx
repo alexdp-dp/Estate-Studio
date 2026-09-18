@@ -182,6 +182,75 @@ function ApartmentCard({a,onClose}){
 }
 
 
+const twoDPalette=[
+  {fill:'rgba(159,206,160,.28)',hover:'rgba(120,184,131,.48)',stroke:'#5f8f70'},
+  {fill:'rgba(156,132,199,.25)',hover:'rgba(132,105,184,.46)',stroke:'#78609f'},
+  {fill:'rgba(122,164,207,.24)',hover:'rgba(91,139,186,.44)',stroke:'#5b83aa'},
+  {fill:'rgba(225,189,100,.23)',hover:'rgba(199,158,61,.42)',stroke:'#a88737'}
+];
+
+function TwoDViewer({project,building,activeFloor,onSelectBuilding,onSelectFloor}){
+  const twoD=project?.settings?.two_d||{};
+  const overview=twoD.overview||{};
+  const scene=building?(twoD.buildings?.[building.id]||{}):overview;
+  const imageUrl=scene.image_url||(building?overview.image_url:null);
+  const [hoverId,setHoverId]=useState(null);
+
+  const showingBuildingScene=!!(building&&scene.image_url);
+  const targets=showingBuildingScene
+    ? (building.floors||[]).map((f,index)=>({id:f.id,label:f.name,raw:f,points:scene.polygons?.[f.id]||[],index,type:'floor'}))
+    : (project.buildings||[]).map((b,index)=>({id:b.id,label:b.name,raw:b,points:overview.polygons?.[b.id]||[],index,type:'building'}));
+
+  const selectedId=showingBuildingScene?activeFloor?.id:building?.id;
+
+  function clickTarget(t){
+    if(t.type==='building')onSelectBuilding?.(t.raw);
+    else onSelectFloor?.(t.raw,building);
+  }
+
+  return <div className="two-d-public-viewer">
+    {imageUrl?<div className="two-d-public-stage">
+      <img src={imageUrl} alt={building?building.name:project.name}/>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+        {targets.map(t=>{
+          if((t.points||[]).length<3)return null;
+          const color=twoDPalette[t.index%twoDPalette.length];
+          const active=hoverId===t.id||selectedId===t.id;
+          return <polygon
+            key={t.id}
+            points={t.points.map(p=>`${Number(p.x)*100},${Number(p.y)*100}`).join(' ')}
+            fill={active?color.hover:color.fill}
+            stroke={active?color.stroke:'rgba(72,94,84,.55)'}
+            strokeWidth={active?.34:.18}
+            vectorEffect="non-scaling-stroke"
+            onMouseEnter={()=>setHoverId(t.id)}
+            onMouseLeave={()=>setHoverId(null)}
+            onClick={()=>clickTarget(t)}
+          />
+        })}
+      </svg>
+      {targets.filter(t=>(t.points||[]).length>=3).map(t=>{
+        const xs=t.points.map(p=>Number(p.x)),ys=t.points.map(p=>Number(p.y));
+        const x=(Math.min(...xs)+Math.max(...xs))/2*100;
+        const y=(Math.min(...ys)+Math.max(...ys))/2*100;
+        return <button
+          key={`label-${t.id}`}
+          className={'two-d-map-label '+((hoverId===t.id||selectedId===t.id)?'active':'')}
+          style={{left:`${x}%`,top:`${y}%`}}
+          onMouseEnter={()=>setHoverId(t.id)}
+          onMouseLeave={()=>setHoverId(null)}
+          onClick={()=>clickTarget(t)}
+        ><b>{t.label}</b><small>{t.type==='floor'?`${t.raw.apartments?.filter(a=>a.status==='available').length||0} disponibile`:'Explorează'}</small></button>
+      })}
+    </div>:<div className="two-d-public-missing">
+      <i className="fa-regular fa-image"/>
+      <b>Randarea 2D nu este disponibilă</b>
+      <span>{building?'Poți alege etajul din meniul lateral.':'Administratorul nu a încărcat încă imaginea ansamblului.'}</span>
+    </div>}
+  </div>
+}
+
+
 function isMobileViewer(){
   return typeof window!=='undefined' && window.matchMedia?.('(max-width: 600px)')?.matches;
 }
@@ -250,12 +319,21 @@ export default function EmbedApp(){
   const [buildingId,setBuildingId]=useState(null),[floor,setFloor]=useState(null),[apartment,setApartment]=useState(null),[activeFloor,setActiveFloor]=useState(null);
   const [viewer,setViewer]=useState(null),[autoRotate,setAutoRotate]=useState(false),[view,setView]=useState('perspective');
   const [mobileTab,setMobileTab]=useState('buildings');
+  const [visualView,setVisualView]=useState('3d');
 
   useEffect(()=>{
     const query=new URLSearchParams(window.location.search);
     const preview=query.get('preview')==='1';
     api(`/public/projects/${slug}${preview?'?preview=1':''}`).then(p=>{
       setProject(p);
+      const visualMode=p.settings?.visual_mode||'3d';
+      const has2D=!!p.settings?.two_d?.overview?.image_url||Object.values(p.settings?.two_d?.buildings||{}).some(s=>!!s?.image_url);
+      const shared3D=p.settings?.model_mode==='shared'&&!!p.settings?.shared_model?.url;
+      const has3D=shared3D||(p.buildings||[]).some(b=>!!b.model_path);
+      let initialVisual=visualMode==='both'?(p.settings?.default_visual||'3d'):visualMode;
+      if(initialVisual==='2d'&&!has2D&&has3D)initialVisual='3d';
+      if(initialVisual==='3d'&&!has3D&&has2D)initialVisual='2d';
+      setVisualView(initialVisual);
       const deep=resolveDeepLink(p,window.location.search);
       if(deep.building){
         setBuildingId(deep.building.id);
@@ -277,6 +355,9 @@ export default function EmbedApp(){
 
   const building=project?.buildings?.find(b=>b.id===buildingId)||null;
   const shared=project?.settings?.model_mode==='shared'?project.settings?.shared_model:null;
+  const visualMode=project?.settings?.visual_mode||'3d';
+  const has2D=!!project?.settings?.two_d?.overview?.image_url||Object.values(project?.settings?.two_d?.buildings||{}).some(s=>!!s?.image_url);
+  const has3D=!!shared?.url||(project?.buildings||[]).some(b=>!!b.model_path);
 
   if(error)return <div className="embed-error"><b>Viewer indisponibil</b><span>{error}</span></div>;
   if(!project)return <div className="embed-loading">ESTATE STUDIO</div>;
@@ -303,7 +384,7 @@ export default function EmbedApp(){
   function toggleRotate(){const next=!autoRotate;setAutoRotate(next);viewer?.setAutoRotate?.(next)}
 
   return <div className="embed-root macheta-ui">
-    <ThreeViewer
+    {visualView==='3d'?<ThreeViewer
       buildings={project.buildings||[]}
       sharedModel={shared}
       selectedBuildingId={buildingId}
@@ -319,14 +400,30 @@ export default function EmbedApp(){
       showGrid={false}
       showBubbles
       onReady={setViewer}
-    />
+    />:<TwoDViewer
+      project={project}
+      building={building}
+      activeFloor={activeFloor}
+      onSelectBuilding={selectBuilding}
+      onSelectFloor={(f,b)=>{
+        setBuildingId(b.id);
+        setActiveFloor(f);
+        setFloor(f);
+        if(isMobileViewer())setMobileTab('floors');
+      }}
+    />}
 
     <div className="macheta-brand">
       {project.settings?.logo_url?<img src={project.settings.logo_url}/>:<div className="macheta-monogram">{project.name.slice(0,2).toLowerCase()}</div>}
-      <div><b>{project.name}</b><span>ANSAMBLU · EXPLORARE 3D</span></div>
+      <div><b>{project.name}</b><span>ANSAMBLU · EXPLORARE {visualView.toUpperCase()}</span></div>
     </div>
 
     <button className="macheta-fullscreen" onClick={()=>document.querySelector('.embed-root')?.requestFullscreen?.()}>⛶ <span>Fullscreen</span></button>
+
+    {visualMode==='both'&&<div className="macheta-visual-switch">
+      <button disabled={!has2D} className={visualView==='2d'?'active':''} onClick={()=>has2D&&setVisualView('2d')}><i className="fa-regular fa-image"/> 2D</button>
+      <button disabled={!has3D} className={visualView==='3d'?'active':''} onClick={()=>has3D&&setVisualView('3d')}><i className="fa-solid fa-cube"/> 3D</button>
+    </div>}
 
     <aside className="macheta-nav">
       <small>PLAN GENERAL</small>
@@ -394,23 +491,28 @@ export default function EmbedApp(){
     </div>
 
 
-    <div className="macheta-view-controls">
-      <button className={view==='perspective'?'active':''} onClick={()=>setPreset('perspective')}>Perspectivă</button>
-      <button className={view==='top'?'active':''} onClick={()=>setPreset('top')}>De sus</button>
-      <button className={autoRotate?'active':''} onClick={toggleRotate}>↻ <span>Auto</span></button>
-    </div>
+    {visualView==='3d'&&<>
+      <div className="macheta-view-controls">
+        <button className={view==='perspective'?'active':''} onClick={()=>setPreset('perspective')}>Perspectivă</button>
+        <button className={view==='top'?'active':''} onClick={()=>setPreset('top')}>De sus</button>
+        <button className={autoRotate?'active':''} onClick={toggleRotate}>↻ <span>Auto</span></button>
+      </div>
 
-    <div className="macheta-tools">
-      <button onClick={()=>viewer?.zoom?.(.82)}>＋</button>
-      <button onClick={()=>viewer?.zoom?.(1.22)}>−</button>
-      <button onClick={()=>{setView('perspective');viewer?.reset?.()}}>⌖</button>
-    </div>
+      <div className="macheta-tools">
+        <button onClick={()=>viewer?.zoom?.(.82)}>＋</button>
+        <button onClick={()=>viewer?.zoom?.(1.22)}>−</button>
+        <button onClick={()=>{setView('perspective');viewer?.reset?.()}}>⌖</button>
+      </div>
 
-    <div className="macheta-north"><b>N</b><span>↑</span></div>
-    <div className="macheta-hint">
-      <span>↖</span> Trage pentru rotire <i/> Scroll pentru zoom <i/>
-      {building?'Hover + click pe etaj':'Hover + click pentru a selecta blocul'}
-    </div>
+      <div className="macheta-north"><b>N</b><span>↑</span></div>
+      <div className="macheta-hint">
+        <span>↖</span> Trage pentru rotire <i/> Scroll pentru zoom <i/>
+        {building?'Hover + click pe etaj':'Hover + click pentru a selecta blocul'}
+      </div>
+    </>}
+    {visualView==='2d'&&<div className="macheta-hint macheta-hint-2d">
+      <i className="fa-regular fa-hand-pointer"/> {building?'Selectează un etaj din randare sau din listă':'Selectează un bloc din randare sau din listă'}
+    </div>}
 
     {floor&&<FloorOverlay floor={floor} onClose={()=>{setFloor(null);setActiveFloor(null)}} onApartment={setApartment}/>}
     {apartment&&<ApartmentCard a={apartment} onClose={()=>setApartment(null)}/>}

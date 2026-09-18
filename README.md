@@ -1,3 +1,75 @@
+# Estate Studio — Build 04.6.0 Hybrid 2D / 3D
+
+Build cumulativ peste 04.5.7.
+
+## Model 2D / 3D
+Pagina `Model 3D` devine `Model 2D / 3D`.
+
+Moduri de proiect:
+- Doar 2D
+- Doar 3D
+- 2D + 3D
+
+În modul hibrid administratorul poate alege vederea implicită 2D sau 3D.
+
+## 2D — ansamblu
+Administratorul poate încărca o randare generală a ansamblului și mapa blocurile direct pe imagine.
+
+## 2D — bloc
+Pentru fiecare bloc poate încărca o randare dedicată și mapa etajele direct pe imagine.
+
+## Același motor de poligoane
+Maparea blocurilor și etajelor 2D folosește componenta `PlanEditor` existentă, generalizată pentru scene:
+- Draw / Edit
+- Snap 0/90
+- Snap 45
+- Snap vertices
+- Snap edit
+- Undo
+- drag punct
+- drag latură
+- delete punct
+- insert punct pe latură
+- copy polygon
+- Flip H / Flip V
+- paste & move
+- Space + drag pentru pan
+- middle mouse pan
+- zoom
+- fit
+- delete polygon
+- save polygon
+
+Motorul apartamentelor continuă să folosească aceeași componentă.
+
+## Persistență
+Nu este necesară o migrare nouă de DB.
+Configurația 2D se salvează în `projects.settings.two_d`:
+- `overview.image_url`
+- `overview.polygons[building_id]`
+- `buildings[building_id].image_url`
+- `buildings[building_id].polygons[floor_id]`
+
+Imaginile sunt încărcate în bucket-ul existent `project-images`.
+
+## Frontend
+- proiect 2D → randare interactivă;
+- proiect 3D → viewerul existent;
+- proiect 2D + 3D → selector `2D / 3D`;
+- selecția de bloc și etaj este comună între cele două moduri;
+- schimbarea 2D ↔ 3D păstrează contextul selectat;
+- în 2D, hover/click pe bloc sau etaj lucrează pe poligoanele desenate;
+- planul de etaj și apartamentele rămân aceleași;
+- deep links din 04.5.7 funcționează în ambele moduri.
+
+## Dashboard
+Pentru proiectele doar 2D, cadrul principal din Dashboard folosește randarea ansamblului în locul modelului GLB.
+
+## Calibrare
+În modul Doar 2D, pagina Calibrare afișează că scalarea 3D nu este necesară.
+
+`/api/version` => `04.6.0-hybrid-2d-3d`
+
 # Estate Studio — Build 04.5.7 Deep Links
 
 Build cumulativ peste 04.5.6.
