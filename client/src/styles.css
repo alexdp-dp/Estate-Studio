@@ -3038,3 +3038,376 @@ button:active{transform:translateY(1px)}
 .macheta-floors{z-index:99!important}
 .macheta-view-controls,.macheta-tools,.macheta-north,.macheta-hint{z-index:98!important}
 .embed-overlay{z-index:200!important}
+
+
+/* ==========================================================================
+   04.5.1 — RECTANGULAR UI PASS
+   Final normalization layer. This intentionally overrides the rounder 04.5.0
+   styling so the whole product feels sharper, flatter and more CRM-like.
+   ========================================================================== */
+
+:root{
+  --es-radius:8px;
+  --es-radius-sm:6px;
+  --es-radius-xs:5px;
+  --es-shadow:0 5px 16px rgba(23,45,34,.045);
+  --es-shadow-lg:0 16px 42px rgba(22,42,33,.12);
+}
+
+/* ----- Global admin button system: compact, rectangular, consistent ----- */
+.primary,
+.success,
+.button-link,
+.button-file,
+.ui-action,
+button.ui-action,
+.project-top-actions a,
+.card-actions button,
+.row-actions button,
+.sidebar-foot button{
+  min-height:34px!important;
+  height:auto;
+  padding:7px 11px!important;
+  border-radius:6px!important;
+  font-size:11px!important;
+  font-weight:700!important;
+  line-height:1.15!important;
+}
+.primary.big{
+  min-height:38px!important;
+  padding:9px 13px!important;
+}
+button.ui-action.destructive-plan-action{
+  min-height:34px!important;
+  padding:7px 11px!important;
+  border-radius:6px!important;
+}
+
+/* Planuri & apartamente: make ALL top actions one visual family. */
+.plan-head>div:last-child{
+  gap:6px!important;
+  align-items:center!important;
+}
+.plan-head>div:last-child>button,
+.plan-head>div:last-child>.ui-action,
+.plan-head>div:last-child>.primary{
+  min-height:34px!important;
+  padding:7px 10px!important;
+  border-radius:6px!important;
+  font-size:10.5px!important;
+  font-weight:700!important;
+  box-shadow:none!important;
+}
+.plan-head>div:last-child>.primary{
+  background:#0d8766!important;
+  border:1px solid #0d8766!important;
+}
+.plan-head>div:last-child>.primary:hover{
+  background:#087457!important;
+}
+.plan-head>div:last-child>.destructive-plan-action{
+  background:#fff!important;
+  border:1px solid #dfb8b8!important;
+  color:#a53c3c!important;
+}
+.plan-head>div:last-child>.destructive-plan-action:hover{
+  background:#fff4f4!important;
+  border-color:#cf9696!important;
+}
+
+/* Polygon editor toolbar: compact controls, no giant rounded chips. */
+.polygon-workspace{
+  border-radius:8px!important;
+  padding:12px!important;
+}
+.polygon-toolbar{
+  gap:5px!important;
+  flex-wrap:wrap!important;
+  padding:0 0 10px!important;
+  margin-bottom:10px!important;
+}
+.polygon-toolbar>button,
+.polygon-toolbar .segmented button{
+  min-height:32px!important;
+  padding:6px 9px!important;
+  border-radius:5px!important;
+  font-size:10px!important;
+  line-height:1.1!important;
+  box-shadow:none!important;
+}
+.polygon-toolbar .segmented{
+  gap:2px!important;
+  padding:2px!important;
+  border-radius:6px!important;
+  background:#edf2ef!important;
+}
+.polygon-toolbar .segmented button.active{
+  border-radius:4px!important;
+  box-shadow:0 1px 4px rgba(23,45,34,.07)!important;
+}
+.polygon-toolbar .segment-danger{
+  border-radius:4px!important;
+}
+.save-notice{
+  font-size:10px!important;
+}
+.zoom-label{
+  font-size:10px!important;
+}
+
+/* ----- Rectangular cards / surfaces throughout admin ----- */
+.login-card,
+.project-card,
+.empty-state,
+.panel,
+.table,
+.upload-zone,
+.asset-preview,
+.asset-placeholder,
+.modal-card,
+.drawer-card,
+.site-confirm-card,
+.polygon-workspace,
+.apartment-palette,
+.stage-holder,
+.detector-settings,
+.detector-settings-v2,
+.detector-intro,
+.detector-summary,
+.guided-help,
+.guided-stage,
+.detector-preview,
+.detector-grid>div,
+.shared-mapper,
+.copy-check,
+.copy-target-group,
+.complete-building-target,
+.notice,
+.error-box{
+  border-radius:8px!important;
+}
+.modal-card,
+.site-confirm-card{
+  border-radius:9px!important;
+}
+.drawer-card{
+  border-radius:8px 0 0 8px!important;
+}
+.project-cover{
+  border-radius:0!important;
+}
+.project-card{
+  overflow:hidden;
+}
+.project-cover>span,
+.logo-mark,
+.brand>span,
+.main-nav-icon,
+.project-nav a span{
+  border-radius:6px!important;
+}
+.project-cover i,
+.status-pill{
+  border-radius:999px!important; /* status badges intentionally remain pills */
+}
+
+/* Navigation and header surfaces */
+.main-sidebar nav a,
+.main-sidebar .main-nav-link,
+.project-nav a,
+.project-top-actions a{
+  border-radius:6px!important;
+}
+.project-nav a span{
+  border-radius:5px!important;
+}
+.project-nav a.active{
+  box-shadow:none!important;
+}
+
+/* Inputs / selects / textareas: sharper enterprise UI */
+.login-card input,
+.panel input,.panel select,.panel textarea,
+.drawer input,.drawer select,.drawer textarea,
+.section-head select,.inline-selects select,
+.modal-card input,.modal-card select,.modal-card textarea,
+.site-typed-confirm .typed-confirm-input{
+  border-radius:6px!important;
+}
+.check,
+.copy-check{
+  border-radius:6px!important;
+}
+
+/* Tables and rows */
+.table{
+  border-radius:7px!important;
+}
+.tr{
+  border-radius:0!important;
+}
+.apartment-table{
+  border-radius:7px!important;
+}
+
+/* Detector actions and cards */
+.detector-actions button,
+.detector-settings button,
+.detector-settings-v2 button,
+.guided-stage button,
+.detector-preview button{
+  border-radius:6px!important;
+}
+.guided-stage-head strong{
+  border-radius:5px!important;
+}
+
+/* 3D admin mapper */
+.mapper-sidebar{
+  border-radius:0!important;
+}
+.building-bubble{
+  border-radius:7px!important;
+}
+.bubble-dot{
+  border-radius:50%!important;
+}
+
+/* ----- Public frontend: same sharper geometry ----- */
+.macheta-brand{
+  border-radius:8px!important;
+}
+.macheta-monogram{
+  border-radius:6px!important;
+}
+.macheta-fullscreen,
+.macheta-tools button,
+.macheta-north,
+.macheta-hint,
+.macheta-view-controls,
+.macheta-nav,
+.macheta-floors{
+  border-radius:8px!important;
+}
+.macheta-nav button,
+.macheta-floors button,
+.macheta-view-controls button{
+  border-radius:5px!important;
+}
+.public-viewer .building-bubble,
+.building-bubble{
+  border-radius:7px!important;
+}
+
+/* Floor-plan modal / apartment frontend */
+.floor-sheet{
+  border-radius:10px!important;
+}
+.sheet-close{
+  border-radius:6px!important;
+}
+.plan-public{
+  border-radius:7px!important;
+}
+.plan-zoom-controls{
+  border-radius:7px!important;
+  padding:3px!important;
+}
+.plan-zoom-controls button{
+  border-radius:5px!important;
+  width:30px!important;
+  height:30px!important;
+}
+.apartments-strip button{
+  border-radius:7px!important;
+}
+.apartment-card{
+  border-radius:10px!important;
+}
+.apartment-card>img{
+  border-radius:7px!important;
+}
+.apartment-stats{
+  border-radius:7px!important;
+}
+.apartment-hover-tooltip{
+  border-radius:7px!important;
+}
+
+/* Mobile wheel: rectangular container while preserving cylindrical behavior. */
+.mobile-wheel-bar{
+  border-radius:8px!important;
+}
+.mobile-wheel-wrap{
+  border-radius:6px!important;
+}
+.mobile-wheel-center{
+  border-radius:4px!important;
+}
+.mobile-wheel-back{
+  border-radius:6px!important;
+}
+.mobile-wheel>button{
+  border-radius:4px!important;
+}
+
+/* Delete / confirm buttons remain visually coherent with the new button system. */
+.ui-danger{
+  min-height:34px!important;
+  padding:7px 11px!important;
+  border-radius:6px!important;
+  font-size:11px!important;
+  font-weight:700!important;
+}
+.site-confirm-x,
+.x{
+  border-radius:6px!important;
+}
+.site-confirm-icon{
+  border-radius:6px!important;
+}
+
+/* Reduce exaggerated shadows after flattening the geometry. */
+.project-card,
+.panel,
+.polygon-workspace,
+.shared-mapper,
+.guided-stage{
+  box-shadow:0 4px 14px rgba(23,45,34,.04)!important;
+}
+.modal-card,
+.drawer-card,
+.site-confirm-card,
+.floor-sheet,
+.apartment-card{
+  box-shadow:0 16px 42px rgba(18,38,28,.14)!important;
+}
+
+/* Buttons in copy modals / utilities */
+.copy-actions-row button,
+.copy-quick button,
+.complete-building-target button,
+.copy-modal button{
+  border-radius:6px!important;
+}
+
+/* Responsive: keep compact admin actions readable rather than huge full-height buttons. */
+@media(max-width:760px){
+  .plan-head>div:last-child{
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    width:100%;
+    gap:6px!important;
+  }
+  .plan-head>div:last-child>button{
+    width:100%;
+    justify-content:center;
+    white-space:normal;
+  }
+  .polygon-toolbar{
+    align-items:stretch!important;
+  }
+  .polygon-toolbar .segmented{
+    flex-wrap:wrap!important;
+  }
+}

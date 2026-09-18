@@ -1,3 +1,44 @@
+# Estate Studio — Build 04.5.1 Rectangular UI CSS Pass
+
+Hotfix vizual peste 04.5.0. Logica aplicației nu este modificată.
+
+## Ce repară
+- toate suprafețele principale trec de la colțuri foarte rotunde la colțuri mici, în general 6–8 px;
+- cardurile, panelurile, modalurile, formularele, tabelele, editorul poligonal, detectorul PNG și frontend-ul public au aceeași geometrie vizuală;
+- butoanele sunt mai compacte și mai rectangulare.
+
+## Planuri & apartamente
+Acțiunile din header sunt normalizate explicit:
+- Detectează apartamente
+- Copiază plan + mapare
+- Apartament
+- Șterge plan etaj
+- Șterge toate planurile
+
+Au aceeași înălțime, padding, radius, font și sistem de hover; doar rolul primary / destructive schimbă culoarea.
+
+## Editor poligonal
+Toate controalele din bara de sus sunt micșorate și aduse în aceeași familie:
+- Editează
+- Desenează nou
+- Șterge poligon
+- Snap 0/90
+- 45°
+- Vertices
+- Snap edit
+- Undo
+- Șterge punct
+- Adaugă punct pe latură
+- Copiază poligon
+- Flip H / Flip V
+- Lipește și mută
+- Încadrează planul
+- Salvează poligon
+
+Status pills rămân intenționat rotunde; restul zonelor și controalelor sunt rectangularizate.
+
+`/api/version` => `04.5.1-rectangular-ui-css-pass`
+
 # Estate Studio — Build 04.5.0 Modern UI Overhaul
 
 Redesign vizual complet, cumulativ peste 04.4.31. Nu schimbă logica existentă.
