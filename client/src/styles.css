@@ -4250,3 +4250,376 @@ button.ui-action:hover,
     bottom:14px!important;
   }
 }
+
+
+/* ==========================================================================
+   04.5.5 — DASHBOARD + PALETTE HIGHLIGHT FIX
+   ========================================================================== */
+
+/* + Apartament: deep sage from the palette, always white text. */
+.plan-head .add-action,
+.plan-head button.add-action,
+.plan-head .primary.add-action{
+  background:#356b57 !important;
+  border-color:#356b57 !important;
+  color:#fff !important;
+  text-shadow:none !important;
+}
+.plan-head .add-action:hover,
+.plan-head button.add-action:hover,
+.plan-head .primary.add-action:hover{
+  background:#2b5b49 !important;
+  border-color:#2b5b49 !important;
+  color:#fff !important;
+}
+
+/* Dashboard */
+.dashboard-hero-grid{
+  display:grid;
+  grid-template-columns:minmax(0,2fr) minmax(300px,.8fr);
+  gap:16px;
+  margin-bottom:16px;
+}
+.dashboard-3d-card,
+.dashboard-main-kpi,
+.dashboard-panel,
+.dashboard-kpi-card{
+  border:1px solid #dce6e1;
+  border-radius:8px;
+  background:#fff;
+  box-shadow:0 5px 16px rgba(23,45,34,.045);
+}
+.dashboard-3d-card{
+  overflow:hidden;
+}
+.dashboard-card-head{
+  min-height:54px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:11px 14px;
+  border-bottom:1px solid #e2eae6;
+}
+.dashboard-card-head>div{
+  display:grid;
+  gap:2px;
+}
+.dashboard-card-head small{
+  color:#7a8b82;
+  font-size:7px;
+  font-weight:800;
+  letter-spacing:.13em;
+}
+.dashboard-card-head b{
+  color:#1d3a30;
+  font-size:14px;
+  letter-spacing:-.02em;
+}
+.dashboard-card-head>span{
+  padding:5px 8px;
+  border:1px solid #d4e0da;
+  border-radius:5px;
+  background:#f7faf8;
+  color:#6a7b72;
+  font-size:8px;
+  font-weight:750;
+}
+.dashboard-3d-frame{
+  position:relative;
+  height:330px;
+  overflow:hidden;
+  background:linear-gradient(120deg,#eef5f1,#f3f1fa);
+}
+.dashboard-3d-frame .three-viewer{
+  height:100%;
+  min-height:100%;
+  pointer-events:none;
+}
+.dashboard-3d-frame canvas{
+  pointer-events:none!important;
+}
+.dashboard-3d-loading{
+  height:100%;
+  display:grid;
+  place-items:center;
+  color:#7a8b82;
+  font-size:11px;
+}
+.dashboard-main-kpi{
+  padding:16px;
+  background:
+    linear-gradient(135deg,rgba(223,245,234,.92),rgba(238,229,255,.72) 74%),
+    #fff;
+}
+.dashboard-kpi-top{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  color:#5e7168;
+  font-size:8px;
+  font-weight:800;
+  letter-spacing:.1em;
+}
+.dashboard-kpi-top i{
+  width:34px;height:34px;display:grid;place-items:center;
+  border-radius:6px;background:#fff;color:#755f9c;
+  border:1px solid #d7dedb;
+}
+.dashboard-rate-row{
+  display:flex;
+  align-items:center;
+  gap:17px;
+  margin:22px 0;
+}
+.dashboard-rate-ring{
+  width:130px;
+  height:130px;
+  flex:0 0 130px;
+  display:grid;
+  place-items:center;
+  border-radius:50%;
+  background:conic-gradient(#6fae95 var(--rate),#d8ccef var(--rate) 360deg);
+  position:relative;
+}
+.dashboard-rate-ring::after{
+  content:"";
+  position:absolute;
+  width:96px;height:96px;
+  border-radius:50%;
+  background:#fff;
+}
+.dashboard-rate-ring>div{
+  position:relative;z-index:1;
+  display:grid;text-align:center;gap:1px;
+}
+.dashboard-rate-ring b{font-size:25px;color:#1d3a30;letter-spacing:-.04em}
+.dashboard-rate-ring span{font-size:8px;color:#78877f}
+.dashboard-rate-copy{display:grid;gap:3px}
+.dashboard-rate-copy strong{font-size:17px;color:#27483b}
+.dashboard-rate-copy span{max-width:150px;color:#74837b;font-size:10px;line-height:1.35}
+.dashboard-status-mini{
+  display:grid;gap:8px;
+  padding-top:13px;border-top:1px solid rgba(170,190,180,.45);
+}
+.dashboard-status-mini>div,
+.inventory-legend>div{
+  display:grid;
+  grid-template-columns:10px 1fr auto;
+  align-items:center;
+  gap:7px;
+  color:#5f7168;
+  font-size:9px;
+}
+.dashboard-status-mini b,
+.inventory-legend b{color:#1d3a30}
+.dot{
+  width:8px;height:8px;border-radius:50%;display:inline-block;
+}
+.dot.available{background:#83c9a2}
+.dot.reserved{background:#e8aa3a}
+.dot.sold{background:#d65a5a}
+
+.dashboard-kpi-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:12px;
+  margin-bottom:16px;
+}
+.dashboard-kpi-card{
+  min-height:145px;
+  padding:15px;
+  display:grid;
+  grid-template-columns:auto 1fr;
+  align-content:start;
+  gap:4px 10px;
+}
+.dashboard-kpi-card.mint{background:linear-gradient(135deg,#e4f5ec,#f8fbf9)}
+.dashboard-kpi-card.lilac{background:linear-gradient(135deg,#eee7fa,#fbf9fe)}
+.dashboard-kpi-card.blue{background:linear-gradient(135deg,#e7f1fb,#fafcff)}
+.dashboard-kpi-card.yellow{background:linear-gradient(135deg,#fff5cb,#fffdf4)}
+.dashboard-kpi-icon{
+  grid-row:1/4;
+  width:38px;height:38px;
+  display:grid;place-items:center;
+  border:1px solid rgba(120,145,133,.18);
+  border-radius:7px;
+  background:rgba(255,255,255,.72);
+  color:#45685a;
+}
+.dashboard-kpi-card>span{
+  color:#6f8077;
+  font-size:9px;
+  font-weight:700;
+}
+.dashboard-kpi-card>b{
+  color:#1d3a30;
+  font-size:24px;
+  letter-spacing:-.04em;
+}
+.dashboard-kpi-card>small{
+  color:#7a8982;
+  font-size:8px;
+  line-height:1.3;
+}
+.dashboard-kpi-card .delta{
+  font-weight:750;
+}
+.dashboard-kpi-card .delta.up{color:#38785f}
+.dashboard-kpi-card .delta.down{color:#b55050}
+
+.dashboard-mid-grid{
+  display:grid;
+  grid-template-columns:1.15fr .85fr;
+  gap:16px;
+  margin-bottom:16px;
+}
+.dashboard-panel{
+  padding:0;
+  overflow:hidden;
+}
+.room-metric-list{
+  display:grid;
+  gap:16px;
+  padding:16px;
+}
+.room-metric>div:first-child{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  font-size:10px;
+  color:#5e7168;
+}
+.room-metric>div:first-child b{color:#1d3a30}
+.room-bar{
+  height:8px;
+  margin:6px 0 4px;
+  overflow:hidden;
+  border-radius:4px;
+  background:#edf2ef;
+}
+.room-bar i{
+  display:block;height:100%;border-radius:4px;
+}
+.room-metric.studio .room-bar i{background:#9fcea0}
+.room-metric.r2 .room-bar i{background:#9c84c7}
+.room-metric.r3 .room-bar i{background:#4f856f}
+.room-metric.r4 .room-bar i{background:#548895}
+.room-metric small{color:#8a9891;font-size:8px}
+
+.inventory-overview{padding-bottom:16px}
+.inventory-stack{
+  display:flex;
+  height:18px;
+  margin:18px 16px 12px;
+  overflow:hidden;
+  border-radius:5px;
+  background:#eef2f0;
+}
+.inventory-stack>div{height:100%}
+.inventory-stack .available{background:#83c9a2}
+.inventory-stack .reserved{background:#e8aa3a}
+.inventory-stack .sold{background:#d65a5a}
+.inventory-legend{
+  display:grid;
+  gap:8px;
+  padding:0 16px 15px;
+}
+.dashboard-highlight-box{
+  margin:0 16px;
+  padding:13px;
+  display:grid;
+  gap:3px;
+  border:1px solid #d8e1dc;
+  border-radius:7px;
+  background:linear-gradient(110deg,#e2f4eb,#eee7fa);
+}
+.dashboard-highlight-box small{color:#718179;font-size:7px;font-weight:800;letter-spacing:.1em}
+.dashboard-highlight-box strong{color:#29483b;font-size:16px}
+.dashboard-highlight-box span{color:#6e7e76;font-size:9px}
+
+.building-performance{margin-bottom:12px}
+.dashboard-building-table{
+  overflow:auto;
+}
+.dashboard-building-row{
+  min-width:690px;
+  display:grid;
+  grid-template-columns:1.5fr .6fr .75fr .75fr .65fr 1.4fr;
+  gap:10px;
+  align-items:center;
+  min-height:44px;
+  padding:0 14px;
+  border-bottom:1px solid #edf1ef;
+  color:#617169;
+  font-size:9px;
+}
+.dashboard-building-row:last-child{border-bottom:0}
+.dashboard-building-row.head{
+  min-height:34px;
+  background:#f7faf8;
+  color:#89968f;
+  font-size:7px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+}
+.dashboard-building-row strong{color:#1d3a30}
+.building-rate{
+  display:grid;
+  grid-template-columns:1fr 36px;
+  gap:8px;
+  align-items:center;
+  height:8px;
+  border-radius:4px;
+  background:#eef2f0;
+}
+.building-rate i{
+  height:8px;
+  display:block;
+  border-radius:4px;
+  background:linear-gradient(90deg,#83c9a2,#9c84c7);
+}
+.building-rate b{
+  font-size:8px;
+  color:#55675e;
+}
+.dashboard-data-note{
+  margin:8px 2px 0;
+  color:#8a9891;
+  font-size:8px;
+  line-height:1.4;
+}
+
+/* 3D highlighted floor/building now visually belongs to the same muted palette.
+   Shader color is changed in ThreeViewer.jsx; these labels follow it. */
+.model-tooltip{
+  background:rgba(39,72,59,.94)!important;
+  border-color:rgba(180,205,194,.38)!important;
+}
+.model-tooltip strong{color:#f7fbf9!important}
+.model-tooltip span{color:#d8eee4!important}
+
+/* Public selected bubble: avoid the old saturated green completely. */
+.public-viewer .building-bubble.active,
+.building-bubble.active{
+  background:linear-gradient(100deg,#dff5ea,#eee5ff)!important;
+  border-color:#cbdad3!important;
+  color:#29483b!important;
+}
+
+/* Responsive Dashboard */
+@media(max-width:1100px){
+  .dashboard-hero-grid{grid-template-columns:1fr}
+  .dashboard-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){
+  .dashboard-kpi-grid{grid-template-columns:1fr}
+  .dashboard-mid-grid{grid-template-columns:1fr}
+  .dashboard-3d-frame{height:250px}
+  .dashboard-rate-row{align-items:flex-start}
+  .dashboard-rate-ring{width:110px;height:110px;flex-basis:110px}
+  .dashboard-rate-ring::after{width:80px;height:80px}
+  .dashboard-rate-ring b{font-size:21px}
+}

@@ -1,3 +1,38 @@
+# Estate Studio — Build 04.5.5 Dashboard + Palette Highlight
+
+Build cumulativ peste 04.5.4.
+
+## Highlight 3D
+Highlight-ul verde neon din shader a fost eliminat.
+Etajul/clădirea evidențiată folosește acum un verde sage / emerald muted din paleta Estate Studio.
+
+## + Apartament
+Butonul `+ Apartament` este forțat pe deep sage `#356B57` cu text alb și contrast ridicat.
+
+## Dashboard nou
+După `Embed` există acum pagina `Dashboard`, cu icon Font Awesome `chart-pie`.
+
+Dashboardul conține:
+- cadru 3D al proiectului în partea de sus (viewer 3D compact, neinteractiv, cu aspect de screenshot/hero);
+- KPI principal: procent disponibilitate din întreg proiectul;
+- total apartamente;
+- disponibile / rezervate / vândute;
+- număr blocuri și etaje;
+- inventar nou în luna curentă;
+- creștere/scădere față de luna precedentă pe baza apartamentelor create;
+- suprafață medie;
+- preț mediu;
+- valoarea totală a inventarului disponibil;
+- distribuție Studio / 2 / 3 / 4+ camere;
+- stare comercială stacked;
+- tabel per bloc cu total, disponibil, rezervat, vândut și procent disponibilitate.
+
+Paleta Dashboard-ului folosește mint, lilac, pale blue și soft yellow din referințele vizuale.
+
+Notă: schema actuală nu păstrează istoric de status. Indicatorul lunar compară inventarul introdus în sistem luna curentă cu luna precedentă, pe baza `created_at`.
+
+`/api/version` => `04.5.5-dashboard-palette-highlight`
+
 # Estate Studio — Build 04.5.4 Unified Controls + Font Awesome + Gradient
 
 Build cumulativ peste 04.5.3.

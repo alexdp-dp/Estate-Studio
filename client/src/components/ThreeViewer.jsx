@@ -95,7 +95,7 @@ function IndividualBuilding({building,selectedBuildingId,selectedFloor,hoveredFl
             float lum=dot(gl_FragColor.rgb,vec3(.299,.587,.114));
             gl_FragColor.rgb=mix(vec3(lum),vec3(.82,.84,.83),.58);
           }else if(uHasFloor>.5&&vEstateWorld.y>=uMin&&vEstateWorld.y<=uMax){
-            gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(.04,.88,.39),.76);
+            gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(.24,.56,.45),.68);
             gl_FragColor.a=1.;
           }else if(uHover>.5&&uHasFloor<.5){
             gl_FragColor.rgb=vec3(1.)-gl_FragColor.rgb*.52;
@@ -251,7 +251,7 @@ function SharedComplex({url,cfg,buildings,selectedBuildingId,selectedFloor,hover
             float lum=dot(gl_FragColor.rgb,vec3(.299,.587,.114));
             gl_FragColor.rgb=mix(vec3(lum),vec3(.82,.84,.83),.58);
           }else if(uHasFloor>.5&&belongsBuilding>.5&&vEstateWorld.y>=uMin&&vEstateWorld.y<=uMax){
-            gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(.04,.88,.39),.78);
+            gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(.24,.56,.45),.70);
           }else if(uHoverBuilding>.5&&belongsBuilding>.5&&uHasFloor<.5){
             gl_FragColor.rgb=vec3(1.)-gl_FragColor.rgb*.52;
           }

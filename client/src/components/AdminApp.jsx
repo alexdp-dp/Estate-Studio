@@ -1,4 +1,4 @@
-import React,{lazy,useEffect,useMemo,useState} from 'react';
+import React,{lazy,Suspense,useEffect,useMemo,useState} from 'react';
 import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
 import {api,slugify,statusLabel} from '../api';
 const ThreeViewer=lazy(()=>import('./ThreeViewer'));
@@ -6,7 +6,7 @@ const PlanEditor=lazy(()=>import('./PlanEditor'));
 const AutoApartmentDetector=lazy(()=>import('./AutoApartmentDetector'));
 const SharedModelMapper=lazy(()=>import('./SharedModelMapper'));
 
-const STEPS=[['general','General'],['buildings','Blocuri'],['model','Model 3D'],['calibration','Calibrare'],['floors','Etaje'],['plans','Planuri & apartamente'],['preview','Preview'],['embed','Embed']];
+const STEPS=[['general','General'],['buildings','Blocuri'],['model','Model 3D'],['calibration','Calibrare'],['floors','Etaje'],['plans','Planuri & apartamente'],['preview','Preview'],['embed','Embed'],['dashboard','Dashboard']];
 const STEP_ICONS={
   general:'fa-sliders',
   buildings:'fa-building',
@@ -15,7 +15,8 @@ const STEP_ICONS={
   floors:'fa-layer-group',
   plans:'fa-draw-polygon',
   preview:'fa-eye',
-  embed:'fa-code'
+  embed:'fa-code',
+  dashboard:'fa-chart-pie'
 };
 
 function siteConfirm({
@@ -131,7 +132,7 @@ function siteTypedConfirm({
 function Login({onLogin}){const [username,setUsername]=useState('alexdarie'),[password,setPassword]=useState(''),[err,setErr]=useState('');const submit=async e=>{e.preventDefault();setErr('');try{await api('/auth/login',{method:'POST',body:{username,password}});onLogin()}catch(e){setErr(e.message)}};return <div className="login-page"><form onSubmit={submit} className="login-card"><div className="logo-mark">ES</div><h1>Estate Studio</h1><p>Platformă de configurare pentru experiențe imobiliare 3D.</p><label>Utilizator<input value={username} onChange={e=>setUsername(e.target.value)}/></label><label>Parolă<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button className="primary big">Autentificare</button>{err&&<div className="error-box">{err}</div>}</form></div>}
 function Shell({children}){const nav=useNavigate();return <div className="app-shell"><aside className="main-sidebar"><Link className="brand" to="/admin/projects"><span>ES</span><div><b>Estate Studio</b><small>Real Estate Experience</small></div></Link><nav><Link className="main-nav-link" to="/admin/projects"><span className="main-nav-icon">▦</span><span>Proiecte</span></Link></nav><div className="sidebar-foot"><button onClick={async()=>{await api('/auth/logout',{method:'POST'});location.reload()}}>↗ Ieșire</button></div></aside><div className="shell-main">{children}</div></div>}
 function Projects(){const [items,setItems]=useState([]),[show,setShow]=useState(false),[name,setName]=useState(''),[slug,setSlug]=useState(''),[loadError,setLoadError]=useState('');const nav=useNavigate();const load=()=>{setLoadError('');return api('/admin/projects').then(setItems).catch(e=>{setLoadError(e.message);setItems([])})};useEffect(()=>{load()},[]);async function create(e){e.preventDefault();const p=await api('/admin/projects',{method:'POST',body:{name,slug:slug||slugify(name)}});nav(`/admin/projects/${p.id}/general`)}return <Shell><header className="topbar"><div><small>ESTATE STUDIO</small><h1>Proiecte</h1><p>Fiecare proiect are date, modele, planuri și iframe propriu.</p></div><button className="primary" onClick={()=>setShow(true)}>＋ Proiect nou</button></header><div className="content">{loadError&&<div className="error-box" style={{marginBottom:16}}>{loadError}</div>}<div className="project-grid">{items.map(p=><article className="project-card" key={p.id}><div className="project-cover" style={p.settings?.hero_url?{backgroundImage:`linear-gradient(#1d3a3033,#1d3a3033),url(${p.settings.hero_url})`,backgroundSize:'cover',backgroundPosition:'center'}:{}}><span>{p.settings?.hero_url?'':p.name.slice(0,2).toUpperCase()}</span><i className={p.is_published?'live':'draft'}>{p.is_published?'Publicat':'Draft'}</i></div><div className="project-body"><small>/{p.slug}</small><h3>{p.name}</h3><p>{p.building_count||0} blocuri · {p.floor_count||0} etaje · {p.apartment_count||0} apartamente</p><div className="card-actions"><button className="primary" onClick={()=>nav(`/admin/projects/${p.id}/general`)}>Deschide</button><button onClick={async()=>{if(await siteConfirm({title:'Duplică proiectul',message:`Va fi creată o copie nouă pentru ${p.name}.`,confirmLabel:'Duplică'})){await api(`/admin/projects/${p.id}/duplicate`,{method:'POST'});load()}}}>Duplică</button><button className="danger-ghost" onClick={async()=>{if(await siteConfirm({title:'Șterge proiectul',message:`${p.name} va fi șters definitiv, împreună cu datele lui.`,confirmLabel:'Șterge definitiv',danger:true})){await api(`/admin/projects/${p.id}`,{method:'DELETE'});load()}}}>Șterge</button></div></div></article>)}{items.length===0&&<div className="empty-state"><b>Niciun proiect încă</b><span>Creează primul proiect și configurează-i modelul 3D.</span><button className="primary" onClick={()=>setShow(true)}>Creează proiect</button></div>}</div></div>{show&&<div className="modal"><form className="modal-card" onSubmit={create}><button type="button" className="x" onClick={()=>setShow(false)}>×</button><h2>Proiect nou</h2><label>Nume proiect<input autoFocus value={name} onChange={e=>{setName(e.target.value);setSlug(slugify(e.target.value))}} required/></label><label>Slug iframe<input value={slug} onChange={e=>setSlug(slugify(e.target.value))} required/></label><button className="primary big">Creează proiectul</button></form></div>}</Shell>}
-function ProjectShell({project,reload,children}){const {section}=useParams();const idx=Math.max(0,STEPS.findIndex(([k])=>k===section));const complete={general:!!project.name,buildings:(project.buildings||[]).length>0,model:!!project.settings?.shared_model?.url||(project.buildings||[]).some(b=>b.model_path),calibration:project.settings?.model_mode==='shared'?!!project.settings?.shared_model?.display_height_units:(project.buildings||[]).some(b=>b.model_path&&b.real_height_m&&b.display_height_units),floors:(project.buildings||[]).some(b=>(b.floors||[]).length>0),plans:(project.buildings||[]).some(b=>(b.floors||[]).some(f=>f.plan_path&&(f.apartments||[]).length>0)),preview:false,embed:project.is_published};return <Shell><header className="project-top"><div><Link to="/admin/projects">← Proiecte</Link><small>{project.is_published?'PUBLICAT':'DRAFT'}</small><h1>{project.name}</h1><span>/{project.slug}</span></div><div className="project-top-actions"><a href={`/embed/${project.slug}?preview=1`} target="_blank" rel="noreferrer">Deschide viewer ↗</a><button className={project.is_published?'success':'primary'} onClick={async()=>{await api(`/admin/projects/${project.id}`,{method:'PATCH',body:{is_published:!project.is_published}});reload()}}>{project.is_published?'✓ Publicat':'Publică proiectul'}</button></div></header><div className="project-layout"><aside className="project-nav">{STEPS.map(([key,label])=><Link key={key} className={`${section===key?'active':''}${complete[key]?' complete':''}`} to={`/admin/projects/${project.id}/${key}`}><span className="project-nav-icon"><i className={`fa-solid ${STEP_ICONS[key]}`}/></span>{label}</Link>)}</aside><main className="project-content">{children}<div className="step-footer">{idx>0?<Link className="button-link" to={`/admin/projects/${project.id}/${STEPS[idx-1][0]}`}>← {STEPS[idx-1][1]}</Link>:<span/>}{idx<STEPS.length-1&&<Link className="primary" to={`/admin/projects/${project.id}/${STEPS[idx+1][0]}`}>{STEPS[idx+1][1]} →</Link>}</div></main></div></Shell>}
+function ProjectShell({project,reload,children}){const {section}=useParams();const idx=Math.max(0,STEPS.findIndex(([k])=>k===section));const complete={general:!!project.name,buildings:(project.buildings||[]).length>0,model:!!project.settings?.shared_model?.url||(project.buildings||[]).some(b=>b.model_path),calibration:project.settings?.model_mode==='shared'?!!project.settings?.shared_model?.display_height_units:(project.buildings||[]).some(b=>b.model_path&&b.real_height_m&&b.display_height_units),floors:(project.buildings||[]).some(b=>(b.floors||[]).length>0),plans:(project.buildings||[]).some(b=>(b.floors||[]).some(f=>f.plan_path&&(f.apartments||[]).length>0)),preview:false,embed:project.is_published,dashboard:true};return <Shell><header className="project-top"><div><Link to="/admin/projects">← Proiecte</Link><small>{project.is_published?'PUBLICAT':'DRAFT'}</small><h1>{project.name}</h1><span>/{project.slug}</span></div><div className="project-top-actions"><a href={`/embed/${project.slug}?preview=1`} target="_blank" rel="noreferrer">Deschide viewer ↗</a><button className={project.is_published?'success':'primary'} onClick={async()=>{await api(`/admin/projects/${project.id}`,{method:'PATCH',body:{is_published:!project.is_published}});reload()}}>{project.is_published?'✓ Publicat':'Publică proiectul'}</button></div></header><div className="project-layout"><aside className="project-nav">{STEPS.map(([key,label])=><Link key={key} className={`${section===key?'active':''}${complete[key]?' complete':''}`} to={`/admin/projects/${project.id}/${key}`}><span className="project-nav-icon"><i className={`fa-solid ${STEP_ICONS[key]}`}/></span>{label}</Link>)}</aside><main className="project-content">{children}<div className="step-footer">{idx>0?<Link className="button-link" to={`/admin/projects/${project.id}/${STEPS[idx-1][0]}`}>← {STEPS[idx-1][1]}</Link>:<span/>}{idx<STEPS.length-1&&<Link className="primary" to={`/admin/projects/${project.id}/${STEPS[idx+1][0]}`}>{STEPS[idx+1][1]} →</Link>}</div></main></div></Shell>}
 function SectionHead({kicker,title,desc,actions}){return <div className="section-head"><div><small>{kicker}</small><h2>{title}</h2><p>{desc}</p></div>{actions&&<div>{actions}</div>}</div>}
 function General({p,reload}){const [form,setForm]=useState({name:p.name,slug:p.slug,description:p.description||'',embed_height:p.embed_height||760,source_mode:p.source_mode||'glb'});const save=async()=>{await api(`/admin/projects/${p.id}`,{method:'PATCH',body:form});reload()};async function uploadBrand(file,key){const fd=new FormData();fd.append('file',file);fd.append('project_id',p.id);fd.append('asset_type',key==='logo_url'?'project-logo':'project-hero');const u=await api('/admin/upload/project-images',{method:'POST',body:fd});await api(`/admin/projects/${p.id}`,{method:'PATCH',body:{settings:{...(p.settings||{}),[key]:u.url}}});reload()}return <><SectionHead kicker="01 · GENERAL" title="Identitatea proiectului" desc="Datele de bază și modul în care va fi folosit proiectul."/><div className="panel form-grid"><label>Nume proiect<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Slug public<input value={form.slug} onChange={e=>setForm({...form,slug:slugify(e.target.value)})}/></label><label className="wide">Descriere<textarea rows="4" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>Înălțime iframe implicită<input type="number" value={form.embed_height} onChange={e=>setForm({...form,embed_height:+e.target.value})}/></label><label>Sursă model<select value={form.source_mode} onChange={e=>setForm({...form,source_mode:e.target.value})}><option value="glb">GLB / GLTF existent</option><option value="documents">Documentație arhitecturală</option></select></label><div className="wide end"><button className="primary" onClick={save}>Salvează</button></div></div><div className="panel brand-assets"><div><h3>Logo proiect</h3>{p.settings?.logo_url?<img className="asset-preview logo" src={p.settings.logo_url}/>:<div className="asset-placeholder">LOGO</div>}<label className="button-file"><input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadBrand(e.target.files[0],'logo_url')}/>Încarcă logo</label></div><div><h3>Imagine proiect</h3>{p.settings?.hero_url?<img className="asset-preview" src={p.settings.hero_url}/>:<div className="asset-placeholder">HERO</div>}<label className="button-file"><input type="file" accept="image/*" onChange={e=>e.target.files[0]&&uploadBrand(e.target.files[0],'hero_url')}/>Încarcă imagine</label></div></div>{form.source_mode==='documents'&&<Documents p={p} reload={reload}/>}</>}
 function Documents({p,reload}){const [busy,setBusy]=useState(false);async function up(file){setBusy(true);try{const fd=new FormData();fd.append('file',file);fd.append('project_id',p.id);fd.append('asset_type','architectural-document');await api('/admin/upload/project-documents',{method:'POST',body:fd});reload()}finally{setBusy(false)}}return <div className="panel"><h3>Documentație arhitecturală</h3><p className="hint">Încarcă plan general, planuri de nivel, fațade, secțiuni și cote. Fișierele sunt păstrate pe proiect pentru fluxul de modelare.</p><label className="upload-zone"><input type="file" multiple accept=".pdf,image/*,.dwg,.dxf" onChange={e=>[...e.target.files].forEach(up)}/><b>{busy?'Se încarcă…':'＋ Încarcă documentație'}</b><span>PDF, imagini, DWG/DXF · max 50 MB / fișier</span></label><div className="asset-list">{(p.assets||[]).filter(a=>a.asset_type==='architectural-document').map(a=><div key={a.id}><b>{a.file_name||a.label||'Document'}</b><span>{a.mime_type||''}</span></div>)}</div><div className="notice warning">Generarea automată a unui model comercial detaliat din planuri necesită un motor de modelare/AI conectat serverului. Estate Studio păstrează documentația și workflow-ul pregătit, fără să inventeze geometrie lipsă.</div></div>}
@@ -578,5 +579,178 @@ function Plans({p,reload}){
 
 function Preview({p}){return <><SectionHead kicker="06 · PREVIEW" title="Exact ce va vedea clientul" desc="Viewerul de mai jos este aceeași rută folosită în iframe."/><div className="panel iframe-preview"><iframe src={`/embed/${p.slug}?preview=1`} title="Preview"/></div></>}
 function Embed({p,reload}){const origin=window.location.origin;const code=`<iframe\n  src="${origin}/embed/${p.slug}"\n  width="100%"\n  height="${p.embed_height||760}"\n  style="border:0"\n  allowfullscreen\n  loading="lazy"\n></iframe>`;return <><SectionHead kicker="07 · EMBED" title="Integrare în site" desc="Copiază codul și inserează-l în pagina clientului."/><div className="embed-admin-grid"><div className="panel"><h3>Cod iframe</h3><pre className="codebox">{code}</pre><button className="primary" onClick={()=>navigator.clipboard.writeText(code)}>Copiază codul</button></div><div className="panel"><h3>Setări</h3><label>Înălțime iframe (px)<input type="number" defaultValue={p.embed_height||760} onBlur={async e=>{await api(`/admin/projects/${p.id}`,{method:'PATCH',body:{embed_height:+e.target.value}});reload()}}/></label><label>URL direct<input readOnly value={`${origin}/embed/${p.slug}`}/></label><a className="button-link" href={`/embed/${p.slug}`} target="_blank" rel="noreferrer">Deschide viewerul ↗</a></div></div></>}
-function Project(){const {id,section='general'}=useParams();const [p,setP]=useState(null),[err,setErr]=useState('');const load=()=>api(`/admin/projects/${id}`).then(data=>{setP(data);setErr('');return data}).catch(e=>{setErr(e.message);throw e});useEffect(()=>{let active=true;setP(null);setErr('');api(`/admin/projects/${id}`).then(data=>{if(active)setP(data)}).catch(e=>{if(active)setErr(e.message)});return()=>{active=false}},[id]);if(err)return <Shell><div className="content"><div className="error-box">{err}</div></div></Shell>;if(!p)return <div className="page-loading">Se încarcă proiectul…</div>;let comp={general:<General p={p} reload={load}/>,buildings:<Buildings p={p} reload={load}/>,model:<Model p={p} reload={load}/>,calibration:<Calibration p={p} reload={load}/>,floors:<Floors p={p} reload={load}/>,plans:<Plans p={p} reload={load}/>,preview:<Preview p={p}/>,embed:<Embed p={p} reload={load}/>}[section]||<General p={p} reload={load}/>;return <ProjectShell project={p} reload={load}>{comp}</ProjectShell>}
+
+function Dashboard({p}){
+  const apartments=(p.buildings||[]).flatMap(b=>(b.floors||[]).flatMap(f=>(f.apartments||[]).map(a=>({...a,_building:b,_floor:f}))));
+  const total=apartments.length;
+  const countStatus=status=>apartments.filter(a=>a.status===status).length;
+  const available=countStatus('available');
+  const reserved=countStatus('reserved');
+  const sold=countStatus('sold');
+  const availability=total?Math.round((available/total)*100):0;
+
+  const roomCount=rooms=>apartments.filter(a=>Number(a.rooms)===rooms).length;
+  const studios=apartments.filter(a=>Number(a.rooms)<=1&&Number(a.rooms)>0).length;
+  const room2=roomCount(2),room3=roomCount(3);
+  const room4=apartments.filter(a=>Number(a.rooms)>=4).length;
+
+  const priced=apartments.filter(a=>Number(a.price)>0);
+  const avgPrice=priced.length?Math.round(priced.reduce((s,a)=>s+Number(a.price||0),0)/priced.length):0;
+  const availableValue=apartments.filter(a=>a.status==='available').reduce((s,a)=>s+Number(a.price||0),0);
+  const areaValues=apartments.map(a=>Number(a.usable_area_sqm||a.total_area_sqm||0)).filter(Boolean);
+  const avgArea=areaValues.length?Math.round(areaValues.reduce((s,v)=>s+v,0)/areaValues.length):0;
+
+  const now=new Date();
+  const startThis=new Date(now.getFullYear(),now.getMonth(),1);
+  const startPrev=new Date(now.getFullYear(),now.getMonth()-1,1);
+  const addedThis=apartments.filter(a=>a.created_at&&new Date(a.created_at)>=startThis).length;
+  const addedPrev=apartments.filter(a=>a.created_at&&new Date(a.created_at)>=startPrev&&new Date(a.created_at)<startThis).length;
+  const inventoryDelta=addedPrev?Math.round(((addedThis-addedPrev)/addedPrev)*100):(addedThis?100:0);
+  const deltaUp=inventoryDelta>=0;
+
+  const buildingStats=(p.buildings||[]).map(b=>{
+    const aps=(b.floors||[]).flatMap(f=>f.apartments||[]);
+    const av=aps.filter(a=>a.status==='available').length;
+    const rs=aps.filter(a=>a.status==='reserved').length;
+    const sd=aps.filter(a=>a.status==='sold').length;
+    return {id:b.id,name:b.name,total:aps.length,available:av,reserved:rs,sold:sd,rate:aps.length?Math.round(av/aps.length*100):0};
+  });
+
+  const money=v=>v?new Intl.NumberFormat('ro-RO',{maximumFractionDigits:0}).format(v)+' €':'—';
+  const sharedModel=p.settings?.shared_model?.url?p.settings.shared_model:null;
+
+  const roomMetrics=[
+    {label:'Studio / 1 cameră',value:studios,className:'studio'},
+    {label:'2 camere',value:room2,className:'r2'},
+    {label:'3 camere',value:room3,className:'r3'},
+    {label:'4+ camere',value:room4,className:'r4'}
+  ];
+
+  return <>
+    <SectionHead
+      kicker="08 · DASHBOARD"
+      title="Project Intelligence"
+      desc="Imagine de ansamblu pentru inventar, disponibilitate și distribuția apartamentelor."
+    />
+
+    <div className="dashboard-hero-grid">
+      <div className="dashboard-3d-card">
+        <div className="dashboard-card-head">
+          <div><small>CADRU 3D PROIECT</small><b>{p.name}</b></div>
+          <span>{(p.buildings||[]).length} blocuri</span>
+        </div>
+        <div className="dashboard-3d-frame">
+          <Suspense fallback={<div className="dashboard-3d-loading">Se încarcă modelul 3D…</div>}>
+            <ThreeViewer buildings={p.buildings||[]} sharedModel={sharedModel} compact showGrid={false} showBubbles={false}/>
+          </Suspense>
+        </div>
+      </div>
+
+      <div className="dashboard-main-kpi">
+        <div className="dashboard-kpi-top">
+          <span>DISPONIBILITATE PROIECT</span>
+          <i className="fa-solid fa-chart-pie"/>
+        </div>
+        <div className="dashboard-rate-row">
+          <div className="dashboard-rate-ring" style={{'--rate':`${availability*3.6}deg`}}>
+            <div><b>{availability}%</b><span>disponibil</span></div>
+          </div>
+          <div className="dashboard-rate-copy">
+            <strong>{available} din {total}</strong>
+            <span>apartamente disponibile acum</span>
+          </div>
+        </div>
+        <div className="dashboard-status-mini">
+          <div><i className="dot available"/><span>Disponibile</span><b>{available}</b></div>
+          <div><i className="dot reserved"/><span>Rezervate</span><b>{reserved}</b></div>
+          <div><i className="dot sold"/><span>Vândute</span><b>{sold}</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div className="dashboard-kpi-grid">
+      <div className="dashboard-kpi-card mint">
+        <div className="dashboard-kpi-icon"><i className="fa-solid fa-building"/></div>
+        <span>Total apartamente</span><b>{total}</b>
+        <small>{(p.buildings||[]).length} blocuri · {(p.buildings||[]).reduce((s,b)=>s+(b.floors||[]).length,0)} etaje</small>
+      </div>
+      <div className="dashboard-kpi-card lilac">
+        <div className="dashboard-kpi-icon"><i className="fa-solid fa-arrow-trend-up"/></div>
+        <span>Inventar nou</span><b>{addedThis}</b>
+        <small className={deltaUp?'delta up':'delta down'}><i className={`fa-solid ${deltaUp?'fa-arrow-up':'fa-arrow-down'}`}/> {Math.abs(inventoryDelta)}% vs luna trecută</small>
+      </div>
+      <div className="dashboard-kpi-card blue">
+        <div className="dashboard-kpi-icon"><i className="fa-solid fa-ruler-combined"/></div>
+        <span>Suprafață medie</span><b>{avgArea?`${avgArea} m²`:'—'}</b>
+        <small>suprafață utilă / totală disponibilă</small>
+      </div>
+      <div className="dashboard-kpi-card yellow">
+        <div className="dashboard-kpi-icon"><i className="fa-solid fa-tag"/></div>
+        <span>Preț mediu</span><b>{money(avgPrice)}</b>
+        <small>valoare disponibilă: {money(availableValue)}</small>
+      </div>
+    </div>
+
+    <div className="dashboard-mid-grid">
+      <div className="dashboard-panel room-distribution">
+        <div className="dashboard-card-head">
+          <div><small>TIPOLOGII</small><b>Distribuție pe camere</b></div>
+          <span>{total} unități</span>
+        </div>
+        <div className="room-metric-list">
+          {roomMetrics.map(m=>{
+            const pct=total?Math.round(m.value/total*100):0;
+            return <div className={'room-metric '+m.className} key={m.label}>
+              <div><span>{m.label}</span><b>{m.value}</b></div>
+              <div className="room-bar"><i style={{width:`${pct}%`}}/></div>
+              <small>{pct}% din proiect</small>
+            </div>
+          })}
+        </div>
+      </div>
+
+      <div className="dashboard-panel inventory-overview">
+        <div className="dashboard-card-head">
+          <div><small>INVENTAR</small><b>Stare comercială</b></div>
+        </div>
+        <div className="inventory-stack">
+          <div className="available" style={{width:`${total?available/total*100:0}%`}}/>
+          <div className="reserved" style={{width:`${total?reserved/total*100:0}%`}}/>
+          <div className="sold" style={{width:`${total?sold/total*100:0}%`}}/>
+        </div>
+        <div className="inventory-legend">
+          <div><i className="dot available"/><span>Disponibile</span><b>{available}</b></div>
+          <div><i className="dot reserved"/><span>Rezervate</span><b>{reserved}</b></div>
+          <div><i className="dot sold"/><span>Vândute</span><b>{sold}</b></div>
+        </div>
+        <div className="dashboard-highlight-box">
+          <small>KPI PRINCIPAL</small>
+          <strong>{availability}% disponibilitate</strong>
+          <span>{total-available} unități sunt rezervate sau vândute.</span>
+        </div>
+      </div>
+    </div>
+
+    <div className="dashboard-panel building-performance">
+      <div className="dashboard-card-head">
+        <div><small>PER BLOC</small><b>Disponibilitate și inventar</b></div>
+      </div>
+      <div className="dashboard-building-table">
+        <div className="dashboard-building-row head"><span>Bloc</span><span>Total</span><span>Disponibile</span><span>Rezervate</span><span>Vândute</span><span>Disponibilitate</span></div>
+        {buildingStats.map(b=><div className="dashboard-building-row" key={b.id}>
+          <strong>{b.name}</strong>
+          <span>{b.total}</span>
+          <span>{b.available}</span>
+          <span>{b.reserved}</span>
+          <span>{b.sold}</span>
+          <div className="building-rate"><i style={{width:`${b.rate}%`}}/><b>{b.rate}%</b></div>
+        </div>)}
+      </div>
+    </div>
+
+    <p className="dashboard-data-note">Indicatorul lunar compară apartamentele introduse în proiect în luna curentă cu luna precedentă, pe baza datei de creare. Istoricul schimbărilor de status nu este stocat încă.</p>
+  </>
+}
+
+function Project(){const {id,section='general'}=useParams();const [p,setP]=useState(null),[err,setErr]=useState('');const load=()=>api(`/admin/projects/${id}`).then(data=>{setP(data);setErr('');return data}).catch(e=>{setErr(e.message);throw e});useEffect(()=>{let active=true;setP(null);setErr('');api(`/admin/projects/${id}`).then(data=>{if(active)setP(data)}).catch(e=>{if(active)setErr(e.message)});return()=>{active=false}},[id]);if(err)return <Shell><div className="content"><div className="error-box">{err}</div></div></Shell>;if(!p)return <div className="page-loading">Se încarcă proiectul…</div>;let comp={general:<General p={p} reload={load}/>,buildings:<Buildings p={p} reload={load}/>,model:<Model p={p} reload={load}/>,calibration:<Calibration p={p} reload={load}/>,floors:<Floors p={p} reload={load}/>,plans:<Plans p={p} reload={load}/>,preview:<Preview p={p}/>,embed:<Embed p={p} reload={load}/>,dashboard:<Dashboard p={p}/>}[section]||<General p={p} reload={load}/>;return <ProjectShell project={p} reload={load}>{comp}</ProjectShell>}
 export default function AdminApp(){const [auth,setAuth]=useState(null);useEffect(()=>{api('/auth/me').then(()=>setAuth(true)).catch(()=>setAuth(false))},[]);if(auth===null)return <div className="page-loading">ESTATE STUDIO</div>;if(!auth)return <Login onLogin={()=>setAuth(true)}/>;return <Routes><Route path="/" element={<Navigate to="/admin/projects" replace/>}/><Route path="/admin" element={<Navigate to="/admin/projects" replace/>}/><Route path="/admin/projects" element={<Projects/>}/><Route path="/admin/projects/:id/:section" element={<Project/>}/><Route path="*" element={<Navigate to="/admin/projects" replace/>}/></Routes>}
