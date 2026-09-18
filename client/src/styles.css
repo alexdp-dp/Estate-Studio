@@ -5406,3 +5406,23 @@ button.ui-action:hover,
   color:#718078;
   line-height:1.5;
 }
+
+
+/* ==========================================================================
+   04.6.4 — 2D MULTIPLY HIGHLIGHT
+   ========================================================================== */
+
+/* 2D mapping highlight: no outline/stroke at all. The polygon color blends
+   into the render with multiply so the image texture remains visible. */
+.two-d-public-stage polygon{
+  stroke:none!important;
+  stroke-width:0!important;
+  mix-blend-mode:multiply!important;
+  opacity:1!important;
+  transition:fill .12s ease,opacity .12s ease!important;
+}
+
+/* Keep the highlight soft enough that the edge does not read like a hard mask. */
+.two-d-public-stage svg{
+  isolation:isolate;
+}

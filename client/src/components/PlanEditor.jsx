@@ -263,6 +263,7 @@ export default function PlanEditor({
   const panWasDragging=useRef(false);
   const vertexDragging=useRef(false);
   const editGesture=useRef(null);
+  const suppressNextDrawClick=useRef(false);
   const draftRef=useRef([]);
   const spaceHeld=useRef(false);
   const tempPan=useRef({active:false,startPointer:null,startPos:null});
@@ -282,7 +283,7 @@ export default function PlanEditor({
   const [notice,setNotice]=useState('');
   const [snapOrtho,setSnapOrtho]=useState(!perspectiveMode);
   const [snap45,setSnap45]=useState(false);
-  const [snapVertices,setSnapVertices]=useState(true);
+  const [snapVertices,setSnapVertices]=useState(!perspectiveMode);
   const [snapEdit,setSnapEdit]=useState(false);
   const [selectedVertex,setSelectedVertex]=useState(null);
   const [selectedEdge,setSelectedEdge]=useState(null);
@@ -308,6 +309,7 @@ export default function PlanEditor({
   useEffect(()=>{
     setSnapOrtho(!perspectiveMode);
     setSnap45(false);
+    setSnapVertices(!perspectiveMode);
     setSnapEdit(false);
   },[perspectiveMode,sceneIdentity]);
 
@@ -619,6 +621,10 @@ export default function PlanEditor({
 
   function addPoint(e){
     if(mode!=='draw'||panWasDragging.current)return;
+    if(suppressNextDrawClick.current){
+      suppressNextDrawClick.current=false;
+      return;
+    }
     if(e.target?.getClassName?.()==='Circle')return;
     const raw=pointerToNorm();
     const force45=!perspectiveMode&&e?.evt?.shiftKey;
@@ -626,7 +632,8 @@ export default function PlanEditor({
     const snapped=disableSnap?raw:applySnap(raw,draftRef.current,{
       snapOrtho:perspectiveMode?false:(snapOrtho||force45),
       snap45:perspectiveMode?false:(snap45||force45),
-      snapVertices
+      snapVertices,
+      vertexThreshold:perspectiveMode?.004:.018
     });
     recordUndo(draftRef.current);
     setDraft(v=>{
@@ -830,6 +837,12 @@ export default function PlanEditor({
     }
     editGesture.current=null;
     vertexDragging.current=false;
+
+    if(mode==='draw'){
+      suppressNextDrawClick.current=true;
+      requestAnimationFrame(()=>{suppressNextDrawClick.current=false});
+    }
+
     if(g.type==='edge'){
       setNotice(perspectiveMode?'Latură mutată · unghiul liber a fost păstrat':'Latură mutată · geometria rămâne ortogonală');
       setStageCursor(perspectiveMode?'move':(g.orientation==='h'?'ns-resize':'ew-resize'));
@@ -883,7 +896,7 @@ export default function PlanEditor({
 
         {perspectiveMode?<div className="segmented snap-controls perspective-snap-controls">
           <button className="active" disabled><i className="fa-solid fa-bezier-curve"/> Unghi liber</button>
-          <button className={snapVertices?'active':''} onClick={()=>setSnapVertices(v=>!v)}>Snap vertices</button>
+          <button className={snapVertices?'active':''} onClick={()=>setSnapVertices(v=>!v)}>Snap vertices {snapVertices?'ON':'OFF'}</button>
         </div>:<div className="segmented snap-controls">
           <button className={snapOrtho?'active':''} onClick={()=>setSnapOrtho(v=>!v)}>Snap 0/90°</button>
           <button className={snap45?'active':''} onClick={()=>setSnap45(v=>!v)}>45°</button>

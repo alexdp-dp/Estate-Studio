@@ -265,8 +265,8 @@ function TwoDViewer({project,building,activeFloor,onSelectBuilding,onSelectFloor
             key={t.id}
             points={t.points.map(p=>`${Number(p.x)*(imageMeta.w||1600)},${Number(p.y)*(imageMeta.h||900)}`).join(' ')}
             fill={active?color.hover:'rgba(0,0,0,0)'}
-            stroke={active?color.stroke:'rgba(0,0,0,0)'}
-            strokeWidth={active?3:0}
+            stroke="none"
+            strokeWidth={0}
             vectorEffect="non-scaling-stroke"
             pointerEvents="all"
             onMouseEnter={()=>setHoverId(t.id)}

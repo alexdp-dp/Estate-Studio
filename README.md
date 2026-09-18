@@ -1,3 +1,35 @@
+# Estate Studio — Build 04.6.4 2D Multiply Highlight
+
+Hotfix peste 04.6.3.
+
+## Viewer 2D
+Highlight-ul pentru blocuri și etaje:
+- nu mai are stroke / outline;
+- poligonul folosește `mix-blend-mode: multiply`;
+- textura randării rămâne vizibilă prin highlight;
+- mappingul rămâne complet invizibil în standby și apare doar la hover.
+
+`/api/version` => `04.6.4-2d-multiply-highlight`
+
+# Estate Studio — Build 04.6.3 Perspective Close Points Fix
+
+Hotfix peste 04.6.2.
+
+## Mapare 2D în perspectivă
+Problema era `Snap vertices`: pragul implicit era suficient de mare încât două puncte apropiate să fie lipite pe aceeași coordonată.
+
+Fix:
+- în editoarele 2D de perspectivă, `Snap vertices` pornește OFF;
+- punctele apropiate pot fi desenate independent;
+- dacă activezi manual Snap vertices, pragul este redus de la 1.8% la 0.4% din imagine;
+- toolbar-ul arată explicit `Snap vertices ON/OFF`.
+
+Editorul apartamentelor rămâne neschimbat: Snap vertices pornește în continuare ON și folosește pragul existent.
+
+Am adăugat și protecție ca mouse-up-ul după mutarea unui punct/laturi în modul Draw să nu creeze accidental un punct nou în exact același loc.
+
+`/api/version` => `04.6.3-perspective-close-points-fix`
+
 # Estate Studio — Build 04.6.2 2D Viewer Fit + Hover
 
 Build cumulativ peste 04.6.1.
